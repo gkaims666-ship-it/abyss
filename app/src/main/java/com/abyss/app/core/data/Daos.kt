@@ -20,7 +20,7 @@ interface ChatDao {
     @Query("SELECT * FROM chat_messages WHERE conversationId = :conversationId ORDER BY id ASC")
     suspend fun loadConversation(conversationId: String): List<ChatMessageEntity>
 
-    Query("SELECT conversationId FROM chat_messages GROUP BY conversationId ORDER BY MAX(createdAt) DESC")
+    @Query("SELECT conversationId FROM chat_messages GROUP BY conversationId ORDER BY MAX(createdAt) DESC")
     fun observeConversations(): Flow<List<String>>
 
     @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
