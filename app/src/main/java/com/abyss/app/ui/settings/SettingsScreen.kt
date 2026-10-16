@@ -458,7 +458,7 @@ private fun InputRow(
                     cursorBrush = SolidColor(palette.primary), modifier = Modifier.fillMaxWidth())
             }
         }
-        AnimatedVisibility(dirty) { PillButton("Save", palette, onCommit) }
+        AnimatedVisibility(dirty) { PillButton("Save", palette, onClick = onCommit) }
     }
 }
 
