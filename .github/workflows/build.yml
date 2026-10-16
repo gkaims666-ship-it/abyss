@@ -17,10 +17,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-         - name: Set up Android SDK
-           uses: android-actions/setup-android@v3
-           with:
-             packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - name: Install Android SDK packages
+        run: |
+          set -e
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMGR=$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -n 1)
+          echo "Using sdkmanager at: $SDKMGR"
+          yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+          "$SDKMGR" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Download Gradle
         run: |
