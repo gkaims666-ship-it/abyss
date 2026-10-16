@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.notes
 
+import com.abyss.app.ui.i18n.LocalStrings
+
 import com.abyss.app.ui.components.blockTaps
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -70,6 +72,7 @@ private fun Color.compositeOverSurface(surface: Color): Color {
 
 @Composable
 fun NotesScreen(palette: AbyssPalette) {
+    val S = LocalStrings.current
     val dao = remember { ServiceLocator.db.noteDao() }
     val notes by remember { dao.observeAll() }.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -87,7 +90,7 @@ fun NotesScreen(palette: AbyssPalette) {
             TextField(
                 value = query, onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search…", color = palette.onSurface.copy(alpha = 0.4f)) },
+                placeholder = { Text(S.searchHint, color = palette.onSurface.copy(alpha = 0.4f)) },
                 shape = RoundedCornerShape(14.dp),
                 colors = fieldColors(palette), singleLine = true,
             )
@@ -110,7 +113,7 @@ fun NotesScreen(palette: AbyssPalette) {
                 .clip(RoundedCornerShape(50)).background(palette.primary)
                 .clickable { editing = NoteEntity() },
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.Add, "New note", tint = palette.onPrimary) }
+        ) { Icon(Icons.Filled.Add, S.newNote, tint = palette.onPrimary) }
 
         AnimatedVisibility(
             visible = editing != null,
@@ -137,6 +140,7 @@ fun NotesScreen(palette: AbyssPalette) {
 
 @Composable
 private fun NoteCard(note: NoteEntity, palette: AbyssPalette, onClick: () -> Unit, onPin: () -> Unit) {
+    val S = LocalStrings.current
     Column(
         Modifier.fillMaxWidth().heightIn(min = 96.dp)
             .clip(RoundedCornerShape(16.dp)).background(noteTint(note.colorIndex, palette))
@@ -144,10 +148,10 @@ private fun NoteCard(note: NoteEntity, palette: AbyssPalette, onClick: () -> Uni
             .clickable(onClick = onClick).padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(note.title.ifBlank { "Untitled" }, color = palette.onSurface,
+            Text(note.title.ifBlank { S.untitled }, color = palette.onSurface,
                 fontWeight = FontWeight.SemiBold, fontSize = 15.sp,
                 modifier = Modifier.weight(1f), maxLines = 1)
-            Icon(Icons.Filled.PushPin, "Pin",
+            Icon(Icons.Filled.PushPin, S.pin,
                 tint = if (note.pinned) palette.primary else palette.onSurface.copy(alpha = 0.35f),
                 modifier = Modifier.size(16.dp).clickable(onClick = onPin))
         }
@@ -161,6 +165,7 @@ private fun NoteEditor(
     note: NoteEntity, palette: AbyssPalette,
     onDismiss: () -> Unit, onSave: (NoteEntity) -> Unit, onDelete: () -> Unit,
 ) {
+    val S = LocalStrings.current
     var title by remember { mutableStateOf(note.title) }
     var body by remember { mutableStateOf(note.body) }
     var color by remember { mutableStateOf(note.colorIndex) }
@@ -173,11 +178,11 @@ private fun NoteEditor(
                 .blockTaps(),
         ) {
             TextField(value = title, onValueChange = { title = it },
-                placeholder = { Text("Title", color = palette.onSurface.copy(alpha = 0.4f)) },
+                placeholder = { Text(S.noteTitle, color = palette.onSurface.copy(alpha = 0.4f)) },
                 modifier = Modifier.fillMaxWidth(), colors = fieldColors(palette), singleLine = true)
             Spacer(Modifier.size(8.dp))
             TextField(value = body, onValueChange = { body = it },
-                placeholder = { Text("Note…", color = palette.onSurface.copy(alpha = 0.4f)) },
+                placeholder = { Text(S.noteBody, color = palette.onSurface.copy(alpha = 0.4f)) },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp), colors = fieldColors(palette))
             Spacer(Modifier.size(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -189,13 +194,13 @@ private fun NoteEditor(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                if (note.id != 0L) Icon(Icons.Filled.Delete, "Delete", tint = palette.error,
+                if (note.id != 0L) Icon(Icons.Filled.Delete, S.delete, tint = palette.error,
                     modifier = Modifier.size(24.dp).clickable(onClick = onDelete))
                 Spacer(Modifier.size(14.dp))
                 Box(Modifier.clip(RoundedCornerShape(12.dp)).background(palette.primary)
                     .clickable { onSave(note.copy(title = title, body = body, colorIndex = color)) }
                     .padding(horizontal = 20.dp, vertical = 12.dp)) {
-                    Text("Save", color = palette.onPrimary, fontWeight = FontWeight.SemiBold)
+                    Text(S.save, color = palette.onPrimary, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

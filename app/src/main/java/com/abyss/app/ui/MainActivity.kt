@@ -7,7 +7,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
-import kotlinx.coroutines.delay
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.abyss.app.ui.components.AbyssIntro
+import androidx.compose.runtime.CompositionLocalProvider
+import com.abyss.app.ui.i18n.I18n
+import com.abyss.app.ui.i18n.LocalStrings
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.abyss.app.ui.background.AbyssAnimatedBackground
@@ -19,6 +23,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -94,6 +99,9 @@ private fun AbyssRoot() {
     var tab by remember { mutableStateOf(Tab.Chat) }
     val imeVisible = WindowInsets.isImeVisible
     val bg = rememberAbyssBackgroundState()
+    // UI language: "system" follows the phone's locale; otherwise the user's pick.
+    val strings = remember(state.settings.language) { I18n.resolve(state.settings.language) }
+    SideEffect { I18n.current = strings }
 
     // System back: from Tools/Settings go to Chat instead of leaving the app.
     // (Nested screens register their own handlers later, so they win first.)
@@ -111,11 +119,11 @@ private fun AbyssRoot() {
         }
     }
 
-    // A wave washes over the screen on launch, and again whenever the theme changes.
-    LaunchedEffect(Unit) {
-        delay(420)
-        bg.emitCenter(strength = 1.15f, reach = 1.35f, sparkCount = 26)
-    }
+    // Launch intro (cold start only — survives rotation). When the black hole
+    // collapses, a wave rolls out of the centre and the UI appears through it.
+    var showIntro by rememberSaveable { mutableStateOf(true) }
+
+    // A wave also washes over the screen whenever the theme changes.
     var firstPalette by remember { mutableStateOf(true) }
     LaunchedEffect(palette.id) {
         if (firstPalette) firstPalette = false
@@ -123,8 +131,10 @@ private fun AbyssRoot() {
     }
 
     // Glyphs fully alive on the empty start page; softened under content.
-    val dim = if (tab == Tab.Chat && state.messages.isEmpty()) 0f else 0.45f
+    val dim by animateFloatAsState(
+        if (tab == Tab.Chat && state.messages.isEmpty()) 0f else 0.45f, tween(600), label = "dim")
 
+    CompositionLocalProvider(LocalStrings provides strings) {
     AbyssTheme(palette = palette) {
         Box(Modifier.fillMaxSize().abyssTouchWaves(bg)) {
             // One living background + waves for the whole app, every tab.
@@ -165,17 +175,31 @@ private fun AbyssRoot() {
 
             // Rings above everything (touch-transparent) — visible over any content.
             AbyssWaveOverlay(palette = palette, state = bg)
+
+            if (showIntro) {
+                AbyssIntro(
+                    palette = palette,
+                    onCollapse = {
+                        if (bg.viewW > 0f) bg.emit(
+                            androidx.compose.ui.geometry.Offset(bg.viewW / 2f, bg.viewH / 2f),
+                            strength = 1.25f, reach = 1.45f, sparkCount = 30)
+                    },
+                    onDone = { showIntro = false },
+                )
+            }
         }
+    }
     }
 }
 
 /** Floating capsule navigation: the active tab expands into an accent pill. */
 @Composable
 private fun PillNav(palette: AbyssPalette, current: Tab, onSelect: (Tab) -> Unit) {
+    val s = LocalStrings.current
     val items = listOf(
-        Triple(Tab.Chat, Icons.AutoMirrored.Filled.Chat, "Chat"),
-        Triple(Tab.Tools, Icons.Filled.Apps, "Tools"),
-        Triple(Tab.Settings, Icons.Filled.Settings, "Settings"),
+        Triple(Tab.Chat, Icons.AutoMirrored.Filled.Chat, s.navChat),
+        Triple(Tab.Tools, Icons.Filled.Apps, s.navTools),
+        Triple(Tab.Settings, Icons.Filled.Settings, s.navSettings),
     )
     Box(
         Modifier.fillMaxWidth().navigationBarsPadding()

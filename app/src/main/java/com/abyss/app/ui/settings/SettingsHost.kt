@@ -53,7 +53,7 @@ fun SettingsHost(vm: ChatViewModel, palette: AbyssPalette) {
             SettingsRoute.Main -> SettingsScreen(vm, palette,
                 onOpenPermissions = { route = SettingsRoute.Permissions })
             SettingsRoute.Permissions -> Column(Modifier.fillMaxSize()) {
-                com.abyss.app.ui.components.BackBar("Permissions", palette) { route = SettingsRoute.Main }
+                com.abyss.app.ui.components.BackBar(com.abyss.app.ui.i18n.LocalStrings.current.permissions, palette) { route = SettingsRoute.Main }
                 PermissionsScreen(palette)
             }
         }

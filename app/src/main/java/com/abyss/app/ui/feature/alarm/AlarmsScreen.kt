@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.alarm
 
+import com.abyss.app.ui.i18n.LocalStrings
+
 import com.abyss.app.ui.components.blockTaps
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -55,10 +57,10 @@ import com.abyss.app.feature.alarm.AlarmScheduler
 import com.abyss.app.ui.theme.AbyssPalette
 import kotlinx.coroutines.launch
 
-private val DAY_LABELS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 @Composable
 fun AlarmsScreen(palette: AbyssPalette) {
+    val S = LocalStrings.current
     val dao = remember { ServiceLocator.db.alarmDao() }
     val alarms by remember { dao.observeAll() }.collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
@@ -90,7 +92,7 @@ fun AlarmsScreen(palette: AbyssPalette) {
                 .clip(RoundedCornerShape(50)).background(palette.primary)
                 .clickable { editing = AlarmEntity(hour = 7, minute = 0, days = "1,2,3,4,5") },
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Filled.Add, "New alarm", tint = palette.onPrimary) }
+        ) { Icon(Icons.Filled.Add, S.newAlarm, tint = palette.onPrimary) }
 
         AnimatedVisibility(visible = editing != null,
             enter = fadeIn() + slideInVertically { it / 2 },
@@ -118,6 +120,7 @@ fun AlarmsScreen(palette: AbyssPalette) {
 
 @Composable
 private fun AlarmRow(alarm: AlarmEntity, palette: AbyssPalette, onToggle: () -> Unit, onClick: () -> Unit) {
+    val S = LocalStrings.current
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
             .background(palette.surface.copy(alpha = if (palette.dark) 0.86f else 0.96f))
@@ -130,11 +133,11 @@ private fun AlarmRow(alarm: AlarmEntity, palette: AbyssPalette, onToggle: () -> 
                 color = if (alarm.enabled) palette.onSurface else palette.onSurface.copy(alpha = 0.4f),
                 fontSize = 30.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
             val daysText = AlarmScheduler.parseDays(alarm.days).sorted()
-                .joinToString(" ") { DAY_LABELS[it - 1] }.ifBlank { "Once" }
+                .joinToString(" ") { S.weekdaysShort[it - 1] }.ifBlank { S.once }
             Text(buildString {
                 append(daysText)
                 if (alarm.label.isNotBlank()) append(" · ${alarm.label}")
-                if (alarm.smartVolume) append(" · smart")
+                if (alarm.smartVolume) append(" · ${S.smart}")
             }, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp)
         }
         Switch(checked = alarm.enabled, onCheckedChange = { onToggle() })
@@ -146,6 +149,7 @@ private fun AlarmEditor(
     alarm: AlarmEntity, palette: AbyssPalette,
     onDismiss: () -> Unit, onSave: (AlarmEntity) -> Unit, onDelete: () -> Unit,
 ) {
+    val S = LocalStrings.current
     var hour by remember { mutableStateOf(alarm.hour) }
     var minute by remember { mutableStateOf(alarm.minute) }
     var label by remember { mutableStateOf(alarm.label) }
@@ -179,14 +183,15 @@ private fun AlarmEditor(
                         .background(if (on) palette.primary else palette.surfaceVariant)
                         .clickable { days = days.toMutableSet().apply { if (on) remove(d) else add(d) } }
                         .padding(vertical = 10.dp), Alignment.Center) {
-                        Text(DAY_LABELS[d - 1].take(1),
-                            color = if (on) palette.onPrimary else palette.onSurface, fontSize = 12.sp)
+                        // Full short label: one-letter initials collide in many languages.
+                        Text(S.weekdaysShort[d - 1], maxLines = 1, softWrap = false,
+                            color = if (on) palette.onPrimary else palette.onSurface, fontSize = 11.sp)
                     }
                 }
             }
             Spacer(Modifier.size(12.dp))
             TextField(value = label, onValueChange = { label = it },
-                placeholder = { Text("Label", color = palette.onSurface.copy(alpha = 0.4f)) },
+                placeholder = { Text(S.alarmLabel, color = palette.onSurface.copy(alpha = 0.4f)) },
                 modifier = Modifier.fillMaxWidth(), singleLine = true,
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = palette.surfaceVariant,
@@ -196,17 +201,17 @@ private fun AlarmEditor(
                     focusedTextColor = palette.onSurface, unfocusedTextColor = palette.onSurface))
 
             Spacer(Modifier.size(10.dp))
-            ToggleRow("Vibrate", vibrate, palette) { vibrate = it }
-            ToggleRow("Skip Sundays", skipSunday, palette) { skipSunday = it }
-            ToggleRow("Smart volume (louder after a late night)", smart, palette) { smart = it }
+            ToggleRow(S.vibrate, vibrate, palette) { vibrate = it }
+            ToggleRow(S.skipSundays, skipSunday, palette) { skipSunday = it }
+            ToggleRow(S.smartVolume, smart, palette) { smart = it }
 
-            Text("Base volume: ${baseVol.toInt()}%", color = palette.onSurface.copy(alpha = 0.7f),
+            Text(S.baseVolume(baseVol.toInt()), color = palette.onSurface.copy(alpha = 0.7f),
                 fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
             Slider(value = baseVol, onValueChange = { baseVol = it }, valueRange = 10f..100f)
 
             Spacer(Modifier.size(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (alarm.id != 0L) Icon(Icons.Filled.Delete, "Delete", tint = palette.error,
+                if (alarm.id != 0L) Icon(Icons.Filled.Delete, S.delete, tint = palette.error,
                     modifier = Modifier.size(24.dp).clickable(onClick = onDelete))
                 Spacer(Modifier.weight(1f))
                 Box(Modifier.clip(RoundedCornerShape(12.dp)).background(palette.primary)
@@ -217,7 +222,7 @@ private fun AlarmEditor(
                             vibrate = vibrate, smartVolume = smart, skipSunday = skipSunday,
                             baseVolumePercent = baseVol.toInt(), enabled = true))
                     }.padding(horizontal = 22.dp, vertical = 12.dp)) {
-                    Text("Save", color = palette.onPrimary, fontWeight = FontWeight.SemiBold)
+                    Text(S.save, color = palette.onPrimary, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -226,12 +231,13 @@ private fun AlarmEditor(
 
 @Composable
 private fun Stepper(value: Int, palette: AbyssPalette, onUp: () -> Unit, onDown: () -> Unit) {
+    val S = LocalStrings.current
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Filled.KeyboardArrowUp, "up", tint = palette.primary,
+        Icon(Icons.Filled.KeyboardArrowUp, S.up, tint = palette.primary,
             modifier = Modifier.size(34.dp).clickable(onClick = onUp))
         Text(String.format("%02d", value), color = palette.onSurface, fontSize = 40.sp,
             fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-        Icon(Icons.Filled.KeyboardArrowDown, "down", tint = palette.primary,
+        Icon(Icons.Filled.KeyboardArrowDown, S.down, tint = palette.primary,
             modifier = Modifier.size(34.dp).clickable(onClick = onDown))
     }
 }

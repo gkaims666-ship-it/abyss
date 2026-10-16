@@ -49,9 +49,9 @@ object TranslationEngine {
     ): Result<Translation2> = runCatching {
         val detected = sourceTag ?: detect(text)
         val src = TranslateLanguage.fromLanguageTag(detected)
-            ?: error("Unsupported source language: $detected")
+            ?: error(com.abyss.app.ui.i18n.I18n.current.unsupportedLanguage(com.abyss.app.ui.i18n.I18n.current.languageName(detected)))
         val tgt = TranslateLanguage.fromLanguageTag(targetTag)
-            ?: error("Unsupported target language: $targetTag")
+            ?: error(com.abyss.app.ui.i18n.I18n.current.unsupportedLanguage(com.abyss.app.ui.i18n.I18n.current.languageName(targetTag)))
         if (src == tgt) return@runCatching Translation2(detected, text, false)
 
         val client = clientFor(src, tgt)

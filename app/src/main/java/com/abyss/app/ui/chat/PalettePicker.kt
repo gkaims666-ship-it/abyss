@@ -60,7 +60,7 @@ fun PalettePicker(
             Box(Modifier.align(Alignment.CenterHorizontally).size(width = 36.dp, height = 4.dp)
                 .clip(CircleShape).background(sheet.outline))
             Spacer(Modifier.size(14.dp))
-            Text("Themes", color = sheet.onSurface, fontFamily = com.abyss.app.ui.theme.AbyssFonts.Display,
+            Text(com.abyss.app.ui.i18n.LocalStrings.current.themes, color = sheet.onSurface, fontFamily = com.abyss.app.ui.theme.AbyssFonts.Display,
                 fontSize = 24.sp)
             Spacer(Modifier.size(14.dp))
             LazyVerticalGrid(columns = GridCells.Fixed(2),

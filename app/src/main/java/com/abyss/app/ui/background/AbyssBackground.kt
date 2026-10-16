@@ -16,16 +16,19 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
@@ -42,6 +45,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.sp
 import com.abyss.app.ui.theme.AbyssPalette
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.hypot
@@ -51,8 +55,17 @@ import kotlin.random.Random
 
 // ============================================================ model
 
-/** One touch wave. [reach] scales its travel (trail waves are small, charged ones big). */
-class Ripple(val center: Offset, val bornNanos: Long, val strength: Float, val reach: Float)
+private const val TAU = (2.0 * PI).toFloat()
+
+/**
+ * One touch wave. [seed] gives every wave its own irregular shape; [speed]
+ * varies how far it travels so no two waves feel identical. [reach] scales
+ * travel too (trail waves are small, charged ones big).
+ */
+class Ripple(
+    val center: Offset, val bornNanos: Long, val strength: Float, val reach: Float,
+    val seed: Float, val speed: Float,
+)
 
 /** A spark thrown out of a wave origin. */
 internal class Spark(
@@ -60,10 +73,26 @@ internal class Spark(
     val born: Long, val lifeNs: Long, val size: Float, val warm: Float,
 )
 
-private const val RIPPLE_LIFE_NS = 1_800_000_000L
+private const val RIPPLE_LIFE_NS = 1_900_000_000L
 private const val MAX_RIPPLES = 6
 private const val CHARGE_DELAY_NS = 380_000_000L
 private const val CHARGE_FULL_NS = 1_100_000_000L
+
+/**
+ * Organic shape of a wavefront: radius multiplier at angle [theta]. Three
+ * harmonics with per-wave phases; irregularity grows as the wave spreads,
+ * like real ripples losing their perfect circle. The SAME formula runs in the
+ * shader, the ring overlay and the glyph physics, so light, outline and the
+ * pushing of glyphs always agree.
+ */
+internal fun wobble(theta: Float, age: Float, seed: Float): Float {
+    val amp = 0.03f + 0.09f * age
+    return 1f + amp * (
+        0.55f * sin(3f * theta + seed + age * 2.1f) +
+            0.30f * sin(5f * theta + seed * 1.7f - age * 3.3f) +
+            0.15f * sin(9f * theta + seed * 2.9f + age * 5.2f)
+        )
+}
 
 /**
  * One engine shared by: the touch modifier, the background (shader + glyphs)
@@ -73,6 +102,7 @@ private const val CHARGE_FULL_NS = 1_100_000_000L
 class AbyssBackgroundState {
     internal val ripples = mutableStateListOf<Ripple>()
     internal val sparks = ArrayList<Spark>()
+    internal val ringPath = Path()          // reused every frame — no per-frame allocation
     private val rnd = Random(3)
 
     var frameNanos by mutableLongStateOf(0L)
@@ -87,12 +117,6 @@ class AbyssBackgroundState {
     internal var viewW = 0f
     internal var viewH = 0f
 
-    /** A wave from just above screen centre — used on launch and theme change. */
-    fun emitCenter(strength: Float = 1f, reach: Float = 1.3f, sparkCount: Int = 20) {
-        if (viewW <= 0f) return
-        emit(Offset(viewW / 2f, viewH * 0.42f), strength, reach, sparkCount)
-    }
-
     // Device tilt parallax (smoothed in the frame loop).
     internal var tiltX = 0f
     internal var tiltY = 0f
@@ -101,10 +125,10 @@ class AbyssBackgroundState {
 
     fun emit(at: Offset, strength: Float = 1f, reach: Float = 1f, sparkCount: Int = 0) {
         val now = System.nanoTime()
-        ripples.add(Ripple(at, now, strength, reach))
+        ripples.add(Ripple(at, now, strength, reach, rnd.nextFloat() * TAU, 0.86f + rnd.nextFloat() * 0.28f))
         while (ripples.size > MAX_RIPPLES) ripples.removeAt(0)
         repeat(sparkCount) {
-            val a = rnd.nextFloat() * 2f * PI.toFloat()
+            val a = rnd.nextFloat() * TAU
             val v = (240f + rnd.nextFloat() * 420f) * strength
             sparks.add(Spark(
                 at.x, at.y, cos(a) * v, sin(a) * v, now,
@@ -115,8 +139,18 @@ class AbyssBackgroundState {
         while (sparks.size > 90) sparks.removeAt(0)
     }
 
+    /** A wave from just above screen centre — used on launch and theme change. */
+    fun emitCenter(strength: Float = 1f, reach: Float = 1.3f, sparkCount: Int = 20) {
+        if (viewW <= 0f) return
+        emit(Offset(viewW / 2f, viewH * 0.42f), strength, reach, sparkCount)
+    }
+
     internal fun age(r: Ripple, now: Long): Float =
         ((now - r.bornNanos).coerceAtLeast(0L)).toFloat() / RIPPLE_LIFE_NS
+
+    /** Current wavefront radius at [theta] for ripple [r]. */
+    internal fun radius(r: Ripple, age: Float, theta: Float, base: Float): Float =
+        easeOutCubic(age) * base * r.reach * r.speed * wobble(theta, age, r.seed)
 
     /** 0..1 charge level of the current hold, or 0 when not charging. */
     internal fun chargeLevel(now: Long): Float {
@@ -179,8 +213,9 @@ fun Modifier.abyssTouchWaves(state: AbyssBackgroundState): Modifier = pointerInp
 private val GLYPHS = listOf(
     "0", "1", "{", "}", "<", ">", "/", "λ", "Σ", "∞", "#", "*", "+", "~", "·", "∴",
     "◇", "≈", "∂", "∇", "Ω", "π", "=>", "fn", "::", "[]", "()", "&&", "|>", "%", "\$", "@",
+    "∫", "√", "≠", "∆", "μ", "ψ", "φ", "θ", "⊕", "⌘", "01", "10", "<>", "//", "^", "?",
 )
-private val LAYER_SIZE = floatArrayOf(11f, 14.5f, 19f)
+private val LAYER_SIZE = floatArrayOf(10.5f, 14f, 18.5f)
 
 private class Glyph(
     var x: Float, var y: Float,
@@ -191,10 +226,10 @@ private class Glyph(
 
 /**
  * The living background. Warm breathing aurora (AGSL, Android 13+) that the
- * waves refract like water, with sparkling caustics on each ring; three
- * parallax layers of glyphs that follow a soft flow field, iridesce under a
- * travelling sheen, occasionally "decrypt", get pushed and lit by wavefronts,
- * and shift with device tilt. Pair with [AbyssWaveOverlay].
+ * waves refract like water, with sparkling caustics along each organic,
+ * irregular wavefront; three parallax layers of glyphs that follow a soft flow
+ * field, iridesce under a travelling sheen, occasionally "decrypt", get pushed
+ * and lit by wavefronts, and shift with device tilt. Pair with [AbyssWaveOverlay].
  */
 @Composable
 fun AbyssAnimatedBackground(
@@ -202,18 +237,18 @@ fun AbyssAnimatedBackground(
     state: AbyssBackgroundState,
     modifier: Modifier = Modifier,
     dim: Float = 0f,
-    glyphCount: Int = 56,
+    glyphCount: Int = 92,
 ) {
     val context = LocalContext.current
     val measurer = rememberTextMeasurer()
     val shader = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RuntimeShader(AURORA_SRC) else null
     }
-    val ripUniform = remember { FloatArray(MAX_RIPPLES * 4) }
+    val ripA = remember { FloatArray(MAX_RIPPLES * 4) }
+    val ripB = remember { FloatArray(MAX_RIPPLES * 2) }
     val layouts = remember { HashMap<String, TextLayoutResult>() }
-    var lastNanos by remember { mutableLongStateOf(0L) }
-    var lastAmbient by remember { mutableLongStateOf(0L) }
-    var canvasSize by remember { mutableStateOf(Offset.Zero) }
+    // Plain holders, not snapshot state: written every frame, never observed.
+    val clock = remember { LongArray(2) }      // [0] last frame, [1] last ambient wave
     val rnd = remember { Random(11) }
 
     // Device tilt → parallax.
@@ -239,8 +274,8 @@ fun AbyssAnimatedBackground(
             Glyph(
                 x = r.nextFloat(), y = r.nextFloat() * 2600f, layer = layer,
                 speed = when (layer) { 0 -> 4f + r.nextFloat() * 5f; 1 -> 8f + r.nextFloat() * 7f; else -> 14f + r.nextFloat() * 9f },
-                baseAlpha = when (layer) { 0 -> 0.05f + r.nextFloat() * 0.07f; 1 -> 0.08f + r.nextFloat() * 0.10f; else -> 0.12f + r.nextFloat() * 0.12f },
-                phase = r.nextFloat() * (2f * PI.toFloat()),
+                baseAlpha = when (layer) { 0 -> 0.045f + r.nextFloat() * 0.065f; 1 -> 0.07f + r.nextFloat() * 0.10f; else -> 0.11f + r.nextFloat() * 0.12f },
+                phase = r.nextFloat() * TAU,
                 sway = 3f + r.nextFloat() * (4f + layer * 4f),
                 char = GLYPHS[r.nextInt(GLYPHS.size)],
                 nextScramble = start + 2_000_000_000L + (r.nextFloat() * 10_000_000_000L).toLong(),
@@ -251,15 +286,16 @@ fun AbyssAnimatedBackground(
     LaunchedEffect(Unit) {
         while (true) {
             withFrameNanos { now ->
-                val dt = if (lastNanos == 0L) 0f else ((now - lastNanos) / 1_000_000_000f).coerceAtMost(0.05f)
-                lastNanos = now
+                val last = clock[0]
+                val dt = if (last == 0L) 0f else ((now - last) / 1_000_000_000f).coerceAtMost(0.05f)
+                clock[0] = now
                 state.frameNanos = now
 
                 val k = (dt * 3.5f).coerceAtMost(1f)
                 state.tiltX += (state.tiltTargetX - state.tiltX) * k
                 state.tiltY += (state.tiltTargetY - state.tiltY) * k
 
-                val h = if (canvasSize.y > 0f) canvasSize.y else 2600f
+                val h = if (state.viewH > 0f) state.viewH else 2600f
                 glyphs.forEach { g ->
                     g.y -= g.speed * dt
                     if (g.y < -40f) { g.y = h + 40f; g.x = rnd.nextFloat() }
@@ -279,12 +315,12 @@ fun AbyssAnimatedBackground(
                     s.vx *= drag; s.vy = s.vy * drag + 30f * dt   // a whisper of gravity
                 }
 
-                state.ripples.removeAll { now - it.bornNanos > RIPPLE_LIFE_NS }
-                if (canvasSize.x > 0f && now - lastAmbient > 6_500_000_000L) {
-                    lastAmbient = now
+                if (state.ripples.isNotEmpty()) state.ripples.removeAll { now - it.bornNanos > RIPPLE_LIFE_NS }
+                if (state.viewW > 0f && now - clock[1] > 6_500_000_000L) {
+                    clock[1] = now
                     state.emit(
-                        Offset(canvasSize.x * (0.15f + rnd.nextFloat() * 0.7f),
-                            canvasSize.y * (0.15f + rnd.nextFloat() * 0.6f)),
+                        Offset(state.viewW * (0.15f + rnd.nextFloat() * 0.7f),
+                            state.viewH * (0.15f + rnd.nextFloat() * 0.6f)),
                         strength = 0.3f, reach = 0.8f,
                     )
                 }
@@ -293,11 +329,10 @@ fun AbyssAnimatedBackground(
     }
 
     Canvas(modifier.fillMaxSize()) {
-        canvasSize = Offset(size.width, size.height)
         state.viewW = size.width
         state.viewH = size.height
         val now = state.frameNanos
-        drawBase(palette, shader, ripUniform, state, now)
+        drawBase(palette, shader, ripA, ripB, state, now)
         drawGlyphs(palette, glyphs, measurer, layouts, now, state, dim)
     }
 }
@@ -311,27 +346,31 @@ fun AbyssWaveOverlay(
 ) {
     Canvas(modifier.fillMaxSize()) {
         val now = state.frameNanos
-        drawRings(palette, state, now)
-        drawSparks(palette, state, now)
-        drawCharge(palette, state, now)
+        if (state.ripples.isNotEmpty()) drawRings(palette, state, now)
+        if (state.sparks.isNotEmpty()) drawSparks(palette, state, now)
+        if (state.charging) drawCharge(palette, state, now)
     }
 }
 
 // ============================================================ drawing: base + glyphs
 
 private fun DrawScope.drawBase(
-    palette: AbyssPalette, shader: RuntimeShader?, rip: FloatArray,
+    palette: AbyssPalette, shader: RuntimeShader?, ripA: FloatArray, ripB: FloatArray,
     state: AbyssBackgroundState, now: Long,
 ) {
     if (shader != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         for (i in 0 until MAX_RIPPLES) {
             val r = state.ripples.getOrNull(i)
-            val o = i * 4
-            if (r == null) { rip[o] = 0f; rip[o + 1] = 0f; rip[o + 2] = -1f; rip[o + 3] = 0f }
-            else {
-                rip[o] = r.center.x; rip[o + 1] = r.center.y
-                rip[o + 2] = state.age(r, now).coerceIn(0f, 1f)
-                rip[o + 3] = r.strength * (0.4f + 0.6f * r.reach)
+            val a = i * 4
+            val b = i * 2
+            if (r == null) {
+                ripA[a] = 0f; ripA[a + 1] = 0f; ripA[a + 2] = -1f; ripA[a + 3] = 0f
+                ripB[b] = 0f; ripB[b + 1] = 0f
+            } else {
+                ripA[a] = r.center.x; ripA[a + 1] = r.center.y
+                ripA[a + 2] = state.age(r, now).coerceIn(0f, 1f)
+                ripA[a + 3] = r.strength * (0.4f + 0.6f * r.reach.coerceAtMost(1f))
+                ripB[b] = r.seed; ripB[b + 1] = r.reach * r.speed
             }
         }
         shader.setFloatUniform("uRes", size.width, size.height)
@@ -342,7 +381,8 @@ private fun DrawScope.drawBase(
         shader.setFloatUniform("uAccent", palette.wave.red, palette.wave.green, palette.wave.blue)
         shader.setFloatUniform("uAccent2", palette.secondary.red, palette.secondary.green, palette.secondary.blue)
         shader.setFloatUniform("uDark", if (palette.dark) 1f else 0f)
-        shader.setFloatUniform("uRip", rip)
+        shader.setFloatUniform("uRip", ripA)
+        shader.setFloatUniform("uRipB", ripB)
         drawRect(ShaderBrush(shader))
     } else {
         drawRect(palette.background)
@@ -369,6 +409,8 @@ private fun DrawScope.drawGlyphs(
 ) {
     val t = (now % 3_600_000_000_000L) / 1_000_000_000f
     val base = size.maxDimension * 0.8f
+    val charge = state.chargeLevel(now)
+    val hasRipples = state.ripples.isNotEmpty()
     glyphs.forEach { g ->
         val scrambling = now < g.scrambleUntil
         val shown = if (scrambling) GLYPHS[((now / 55_000_000L) + g.phase.toLong() * 7).toInt().mod(GLYPHS.size)] else g.char
@@ -386,13 +428,14 @@ private fun DrawScope.drawGlyphs(
         var y = g.y + cos(g.x * 6.0f + t * 0.18f) * 5f * depth + state.tiltY * (4f + g.layer * 8f)
 
         var glow = 0f
-        state.ripples.forEach { r ->
+        if (hasRipples) state.ripples.forEach { r ->
             val age = state.age(r, now)
             if (age <= 1f) {
-                val radius = easeOutCubic(age) * base * r.reach
                 val dx = x - r.center.x
                 val dy = y - r.center.y
                 val d = hypot(dx, dy).coerceAtLeast(1f)
+                // Use the wave's real, irregular front at this glyph's angle.
+                val radius = state.radius(r, age, atan2(dy, dx), base)
                 val band = 80f + 60f * age
                 val q = (d - radius) / band
                 val kk = exp(-q * q) * (1f - age) * r.strength
@@ -403,7 +446,6 @@ private fun DrawScope.drawGlyphs(
             }
         }
         // The charge orb gently attracts nearby glyphs.
-        val charge = state.chargeLevel(now)
         if (charge > 0f) {
             val dx = state.chargePos.x - x
             val dy = state.chargePos.y - y
@@ -420,6 +462,7 @@ private fun DrawScope.drawGlyphs(
         var alpha = g.baseAlpha * (0.4f + 0.6f * tw) + sheen * 0.16f + glow * 0.75f
         if (scrambling) alpha += 0.12f
         alpha *= (1f - 0.55f * dim * (1f - glow))
+        if (alpha < 0.01f) return@forEach   // invisible → skip the draw call
 
         val c1 = lerp(palette.symbol, palette.secondary, sheen * 0.85f)
         val color = lerp(c1, palette.wave, glow.coerceIn(0f, 1f))
@@ -429,28 +472,60 @@ private fun DrawScope.drawGlyphs(
 
 // ============================================================ drawing: overlay
 
+/** Build the irregular wavefront outline into the shared path. */
+private fun buildWavePath(path: Path, state: AbyssBackgroundState, r: Ripple, age: Float, base: Float) {
+    path.reset()
+    val n = 72
+    for (i in 0..n) {
+        val th = i * TAU / n
+        val rr = state.radius(r, age, th, base)
+        val x = r.center.x + cos(th) * rr
+        val y = r.center.y + sin(th) * rr
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    path.close()
+}
+
 private fun DrawScope.drawRings(palette: AbyssPalette, state: AbyssBackgroundState, now: Long) {
     val base = size.maxDimension * 0.8f
+    val path = state.ringPath
     state.ripples.forEach { r ->
         val age = state.age(r, now)
         if (age > 1f) return@forEach
         val life = 1f - age
-        val s = r.strength
-        val maxR = base * r.reach
-        val w = (18f + 46f * age) * (0.5f + 0.5f * r.reach.coerceAtMost(1.3f))
+        val s = r.strength.coerceAtMost(1.4f)
+        val w = (16f + 42f * age) * (0.5f + 0.5f * r.reach.coerceAtMost(1.3f))
+
         for (i in 0 until 3) {
-            val lag = i * 0.11f
+            val lag = i * 0.12f
             val a = ((age - lag) / (1f - lag)).coerceIn(0f, 1f)
             if (a <= 0f) continue
-            val radius = easeOutCubic(a) * maxR
-            val k = (1f - a) * s.coerceAtMost(1.4f) * (1f - i * 0.32f)
-            glowRing(r.center, radius, w * (1f - i * 0.2f), palette.wave, 0.24f * k)
-            drawCircle(
-                color = lerp(palette.wave, palette.secondary, i * 0.35f).copy(alpha = (0.5f * k).coerceAtMost(0.8f)),
-                radius = radius, center = r.center,
-                style = Stroke(width = (2.4f - i * 0.6f) * (0.6f + life)),
-            )
+            val k = (1f - a) * s * (1f - i * 0.33f)
+            if (k < 0.01f) continue
+            buildWavePath(path, state, r, a, base)
+            val tint = lerp(palette.wave, palette.secondary, i * 0.35f)
+
+            if (i == 0) {
+                // Soft body of the wave: stacked strokes, wide→narrow, faint→bright.
+                drawPath(path, tint.copy(alpha = 0.045f * k), style = Stroke(width = w * 1.7f, join = StrokeJoin.Round))
+                drawPath(path, tint.copy(alpha = 0.07f * k), style = Stroke(width = w * 0.95f, join = StrokeJoin.Round))
+                drawPath(path, tint.copy(alpha = 0.12f * k), style = Stroke(width = w * 0.45f, join = StrokeJoin.Round))
+                drawPath(path, tint.copy(alpha = (0.55f * k).coerceAtMost(0.85f)),
+                    style = Stroke(width = 2.2f * (0.6f + life), join = StrokeJoin.Round))
+            } else {
+                // Echo rings break into irregular fragments as they spread.
+                val circ = TAU * easeOutCubic(a) * base * r.reach * r.speed
+                val u = (circ / 23f).coerceAtLeast(4f)
+                val dash = PathEffect.dashPathEffect(
+                    floatArrayOf(u * 2.6f, u * 0.7f, u * 1.3f, u * 1.1f, u * 3.4f, u * 0.5f),
+                    phase = r.seed * u * 3f + a * u * 4f,
+                )
+                drawPath(path, tint.copy(alpha = 0.09f * k), style = Stroke(width = w * 0.6f, join = StrokeJoin.Round, pathEffect = dash))
+                drawPath(path, tint.copy(alpha = (0.45f * k).coerceAtMost(0.7f)),
+                    style = Stroke(width = (1.8f - i * 0.4f) * (0.6f + life), cap = StrokeCap.Round, pathEffect = dash))
+            }
         }
+
         if (age < 0.35f) {
             val k = 1f - age / 0.35f
             val rr = 40f + 260f * age
@@ -461,7 +536,7 @@ private fun DrawScope.drawRings(palette: AbyssPalette, state: AbyssBackgroundSta
                 radius = rr, center = r.center,
             )
             drawCircle(
-                color = Color.White.copy(alpha = 0.18f * k * s.coerceAtMost(1f)),
+                color = Color.White.copy(alpha = 0.16f * k * s.coerceAtMost(1f)),
                 radius = 12f + 90f * easeOutCubic(age / 0.35f), center = r.center,
                 style = Stroke(width = 1.2f),
             )
@@ -486,13 +561,12 @@ private fun DrawScope.drawSparks(palette: AbyssPalette, state: AbyssBackgroundSt
 }
 
 private fun DrawScope.drawCharge(palette: AbyssPalette, state: AbyssBackgroundState, now: Long) {
-    if (!state.charging) return
     val held = now - state.chargeStart
     if (held < 160_000_000L) return
     val appear = ((held - 160_000_000L) / 220_000_000f).coerceIn(0f, 1f)
     val c = state.chargeLevel(now)
     val p = state.chargePos
-    val t = now / 1_000_000_000f
+    val t = (now % 3_600_000_000_000L) / 1_000_000_000f
     val breathe = 1f + 0.06f * sin(t * 9f)
     val orb = (26f + 46f * c) * breathe * appear
 
@@ -508,35 +582,14 @@ private fun DrawScope.drawCharge(palette: AbyssPalette, state: AbyssBackgroundSt
             center = p, radius = orb * 0.6f),
         radius = orb * 0.6f, center = p,
     )
-    // Progress ring that fills as the charge builds.
     val ringR = orb + 18f
-    drawCircle(
-        color = palette.wave.copy(alpha = 0.18f * appear),
-        radius = ringR, center = p, style = Stroke(width = 2f),
-    )
+    drawCircle(color = palette.wave.copy(alpha = 0.18f * appear), radius = ringR, center = p, style = Stroke(width = 2f))
     drawArc(
         color = palette.wave.copy(alpha = 0.85f * appear),
         startAngle = -90f, sweepAngle = 360f * c, useCenter = false,
         topLeft = Offset(p.x - ringR, p.y - ringR),
-        size = androidx.compose.ui.geometry.Size(ringR * 2f, ringR * 2f),
+        size = Size(ringR * 2f, ringR * 2f),
         style = Stroke(width = 3f, cap = StrokeCap.Round),
-    )
-}
-
-/** A soft glowing ring: bright at [radius], feathering out over [width]. */
-private fun DrawScope.glowRing(center: Offset, radius: Float, width: Float, color: Color, alpha: Float) {
-    if (radius < 2f || alpha <= 0.002f) return
-    val outer = radius + width
-    val inner = (radius - width * 1.8f).coerceAtLeast(0f)
-    drawCircle(
-        brush = Brush.radialGradient(
-            0f to Color.Transparent,
-            (inner / outer) to Color.Transparent,
-            (radius / outer) to color.copy(alpha = alpha.coerceIn(0f, 1f)),
-            1f to Color.Transparent,
-            center = center, radius = outer,
-        ),
-        radius = outer, center = center,
     )
 }
 
@@ -546,8 +599,9 @@ private fun easeOutCubic(x: Float): Float { val i = 1f - x; return 1f - i * i * 
 
 /**
  * Breathing warm aurora that the waves REFRACT (the field is sampled through a
- * lens displacement around each ring), plus soft ring light, sparkling
- * caustics along the ring, and brighter interference where waves overlap.
+ * lens displacement around each wavefront), with soft ring light, sparkling
+ * caustics and brighter interference where waves overlap. Each wavefront uses
+ * the same irregular shape as the Kotlin side (see wobble()).
  */
 private const val AURORA_SRC = """
 uniform float2 uRes;
@@ -559,6 +613,7 @@ uniform float3 uAccent;
 uniform float3 uAccent2;
 uniform float uDark;
 uniform float4 uRip[6];
+uniform float2 uRipB[6];
 
 half4 main(float2 p) {
     float2 disp = float2(0.0, 0.0);
@@ -570,19 +625,24 @@ half4 main(float2 p) {
         if (r.z >= 0.0 && r.z <= 1.0) {
             float a = r.z;
             float ia = 1.0 - a;
-            float rad = (1.0 - ia * ia * ia) * uMaxR;
+            float sd = uRipB[i].x;
             float d = distance(p, r.xy);
+            float2 dir = (p - r.xy) / max(d, 1.0);
+            float ang = atan(dir.y, dir.x);
+            float amp = 0.03 + 0.09 * a;
+            float wob = 1.0 + amp * (0.55 * sin(3.0 * ang + sd + a * 2.1)
+                                   + 0.30 * sin(5.0 * ang + sd * 1.7 - a * 3.3)
+                                   + 0.15 * sin(9.0 * ang + sd * 2.9 + a * 5.2));
+            float rad = (1.0 - ia * ia * ia) * uMaxR * uRipB[i].y * wob;
             float w = 50.0 + 120.0 * a;
             float q = (d - rad) / w;
             float ring = exp(-q * q);
-            float2 dir = (p - r.xy) / max(d, 1.0);
             float e = ring * ia * r.w;
             disp += dir * e * 22.0;
             float inner = (1.0 - smoothstep(0.0, max(rad, 1.0), d)) * 0.3;
             light += (ring + inner) * ia * r.w;
             tint += e;
-            float ang = atan(dir.y, dir.x);
-            sparkle += e * (0.5 + 0.5 * sin(ang * 14.0 + uTime * 2.2 + float(i) * 1.7));
+            sparkle += e * (0.5 + 0.5 * sin(ang * 14.0 + uTime * 2.2 + sd * 3.0));
         }
     }
 

@@ -90,6 +90,8 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import com.abyss.app.ui.i18n.LocalStrings
+import com.abyss.app.ui.i18n.Strings
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -145,6 +147,7 @@ fun ChatScreen(
     var showPalettes by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(false) }
     val empty = state.messages.isEmpty()
+    val strings = LocalStrings.current
 
     // System back closes overlays first instead of leaving the app.
     BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
@@ -171,7 +174,7 @@ fun ChatScreen(
             Column(Modifier.fillMaxSize().imePadding()) {
                 TopBar(
                     palette = palette,
-                    agentName = AgentRegistry.byId(state.settings.agentId).name,
+                    agentId = AgentRegistry.byId(state.settings.agentId).id,
                     routed = state.routedAgent,
                     showNewChat = !empty,
                     onMenu = { scope.launch { drawer.open() } },
@@ -212,8 +215,7 @@ fun ChatScreen(
                     onClose = { showCamera = false },
                     onCaptured = { path, mime, kind ->
                         showCamera = false
-                        vm.analyzeCapturedMedia(path, mime, kind,
-                            "Describe in detail what is happening and what is said or heard.")
+                        vm.analyzeCapturedMedia(path, mime, kind, strings.describeMediaPrompt)
                     },
                 )
             }
@@ -226,7 +228,7 @@ fun ChatScreen(
 @Composable
 private fun TopBar(
     palette: AbyssPalette,
-    agentName: String,
+    agentId: String,
     routed: String?,
     showNewChat: Boolean,
     onMenu: () -> Unit,
@@ -235,11 +237,12 @@ private fun TopBar(
     onThemes: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val S = LocalStrings.current
     Row(
         Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconBtn(Icons.Filled.Menu, "Chats", palette, onMenu)
+        IconBtn(Icons.Filled.Menu, S.chats, palette, onMenu)
         Spacer(Modifier.weight(1f))
         Box {
             Row(
@@ -247,9 +250,9 @@ private fun TopBar(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(agentName, color = palette.onBackground, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                AnimatedVisibility(routed != null && agentName == "Auto") {
-                    Text("  · ${routed ?: ""}", color = palette.primary, fontSize = 14.sp)
+                Text(S.agentName(agentId), color = palette.onBackground, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                AnimatedVisibility(routed != null && agentId == "auto") {
+                    Text("  · ${routed?.let { S.agentName(it) } ?: ""}", color = palette.primary, fontSize = 14.sp)
                 }
                 Icon(Icons.Filled.KeyboardArrowDown, null, tint = palette.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.size(18.dp))
@@ -260,8 +263,8 @@ private fun TopBar(
                     DropdownMenuItem(
                         text = {
                             Column(Modifier.padding(vertical = 2.dp)) {
-                                Text(a.name, color = palette.onSurface, fontWeight = FontWeight.Medium)
-                                Text(a.tagline, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp)
+                                Text(S.agentName(a.id), color = palette.onSurface, fontWeight = FontWeight.Medium)
+                                Text(S.agentTagline(a.id), color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp)
                             }
                         },
                         onClick = { onSelectAgent(a.id); menu = false },
@@ -270,8 +273,8 @@ private fun TopBar(
             }
         }
         Spacer(Modifier.weight(1f))
-        if (showNewChat) IconBtn(Icons.Filled.Edit, "New chat", palette, onNewChat)
-        else IconBtn(Icons.Filled.Palette, "Themes", palette, onThemes)
+        if (showNewChat) IconBtn(Icons.Filled.Edit, S.newChat, palette, onNewChat)
+        else IconBtn(Icons.Filled.Palette, S.themes, palette, onThemes)
     }
 }
 
@@ -287,23 +290,22 @@ private fun IconBtn(icon: ImageVector, desc: String, palette: AbyssPalette, onCl
 
 private data class Suggestion(val label: String, val icon: ImageVector, val prompt: String)
 
-private val SUGGESTIONS = listOf(
-    Suggestion("Write", Icons.Filled.Edit, "Help me write "),
-    Suggestion("Learn", Icons.Filled.School, "Explain to me "),
-    Suggestion("Code", Icons.Filled.Code, "Help me code "),
-    Suggestion("Life stuff", Icons.Filled.LocalCafe, "I need advice on "),
-    Suggestion("Surprise me", Icons.Filled.AutoAwesome, "Tell me something fascinating about "),
+private fun suggestions(S: Strings) = listOf(
+    Suggestion(S.sugWrite, Icons.Filled.Edit, S.sugWritePrompt),
+    Suggestion(S.sugLearn, Icons.Filled.School, S.sugLearnPrompt),
+    Suggestion(S.sugCode, Icons.Filled.Code, S.sugCodePrompt),
+    Suggestion(S.sugLife, Icons.Filled.LocalCafe, S.sugLifePrompt),
+    Suggestion(S.sugSurprise, Icons.Filled.AutoAwesome, S.sugSurprisePrompt),
 )
 
-private fun greeting(name: String): String {
-    val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-    val n = name.trim()
-    return when (h) {
-        in 5..11 -> if (n.isEmpty()) "Good morning" else "Good morning, $n"
-        in 12..17 -> if (n.isEmpty()) "Good afternoon" else "Good afternoon, $n"
-        in 18..22 -> if (n.isEmpty()) "Good evening" else "Good evening, $n"
-        else -> if (n.isEmpty()) "Up late?" else "Up late, $n?"
+private fun greeting(S: Strings, name: String): String {
+    val bucket = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+        in 5..11 -> 0
+        in 12..17 -> 1
+        in 18..22 -> 2
+        else -> 3
     }
+    return S.greeting(bucket, name)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -315,7 +317,9 @@ private fun Hero(
     onCamera: () -> Unit,
     onModel: () -> Unit,
 ) {
-    val text = remember(state.settings.userName) { greeting(state.settings.userName) }
+    val S = LocalStrings.current
+    val text = remember(state.settings.userName, S) { greeting(S, state.settings.userName) }
+    val sugs = remember(S) { suggestions(S) }
     val focus = remember { FocusRequester() }
     var shown by remember { mutableIntStateOf(0) }
     LaunchedEffect(text) {
@@ -347,7 +351,7 @@ private fun Hero(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            SUGGESTIONS.forEachIndexed { i, s ->
+            sugs.forEachIndexed { i, s ->
                 Appear(delayMs = 260 + i * 60) {
                     Row(
                         Modifier.clip(RoundedCornerShape(12.dp))
@@ -469,7 +473,7 @@ private fun JumpToLatest(visible: Boolean, palette: AbyssPalette, modifier: Modi
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.KeyboardArrowDown, "Latest", tint = palette.onSurface, modifier = Modifier.size(22.dp))
+            Icon(Icons.Filled.KeyboardArrowDown, LocalStrings.current.latest, tint = palette.onSurface, modifier = Modifier.size(22.dp))
         }
     }
 }
@@ -489,9 +493,9 @@ private fun UserMessage(msg: UiMessage, palette: AbyssPalette, onDelete: () -> U
         ) {
             Text(msg.content, color = palette.onSurface, fontSize = 16.sp, lineHeight = 23.sp)
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Copy") }, onClick = {
+                DropdownMenuItem(text = { Text(LocalStrings.current.copy) }, onClick = {
                     clipboard.setText(AnnotatedString(msg.content)); menu = false })
-                DropdownMenuItem(text = { Text("Delete") }, onClick = { onDelete(); menu = false })
+                DropdownMenuItem(text = { Text(LocalStrings.current.delete) }, onClick = { onDelete(); menu = false })
             }
         }
     }
@@ -513,6 +517,7 @@ private fun AssistantMessage(
     val showingTranslation = msg.showTranslated && msg.translatedText != null
     val body = if (showingTranslation) msg.translatedText.orEmpty() else msg.content
     var copied by remember { mutableStateOf(false) }
+    val S = LocalStrings.current
     LaunchedEffect(copied) { if (copied) { delay(1400); copied = false } }
 
     Column(Modifier.fillMaxWidth().animateContentSize()) {
@@ -522,7 +527,7 @@ private fun AssistantMessage(
             AbyssMark(palette, size = 20.dp, pulse = msg.streaming, speedMs = 1600, animated = msg.streaming)
             if (msg.agentLabel != null) {
                 Spacer(Modifier.width(8.dp))
-                Text(msg.agentLabel, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+                Text(S.agentName(msg.agentLabel), color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
             }
         }
         Spacer(Modifier.size(8.dp))
@@ -534,10 +539,10 @@ private fun AssistantMessage(
                 else -> MarkdownText(body, palette)
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Copy") }, onClick = {
+                DropdownMenuItem(text = { Text(S.copy) }, onClick = {
                     clipboard.setText(AnnotatedString(body)); menu = false })
-                DropdownMenuItem(text = { Text("Regenerate") }, onClick = { onRegenerate(); menu = false })
-                DropdownMenuItem(text = { Text("Delete") }, onClick = { onDelete(); menu = false })
+                DropdownMenuItem(text = { Text(S.regenerate) }, onClick = { onRegenerate(); menu = false })
+                DropdownMenuItem(text = { Text(S.delete) }, onClick = { onDelete(); menu = false })
             }
         }
 
@@ -551,15 +556,15 @@ private fun AssistantMessage(
                 SmallAction(Icons.Filled.Refresh, palette, onClick = onRegenerate)
                 Spacer(Modifier.width(6.dp))
                 when {
-                    msg.translating -> Hint("Translating…", palette)
+                    msg.translating -> Hint(S.translating, palette)
                     showingTranslation -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        Hint("Translated from ${langName(msg.sourceLang)} · ", palette)
-                        Text("Show original", color = palette.primary, fontSize = 12.sp,
+                        Hint(S.translatedFrom(langName(S, msg.sourceLang)), palette)
+                        Text(S.showOriginal, color = palette.primary, fontSize = 12.sp,
                             modifier = Modifier.clickable(onClick = onToggleOriginal))
                     }
-                    msg.translatedText != null -> Text("Show translation", color = palette.primary,
+                    msg.translatedText != null -> Text(S.showTranslation, color = palette.primary,
                         fontSize = 12.sp, modifier = Modifier.clickable(onClick = onToggleOriginal))
-                    msg.offerTranslate -> Text("Translate", color = palette.primary, fontSize = 12.sp,
+                    msg.offerTranslate -> Text(S.translate, color = palette.primary, fontSize = 12.sp,
                         modifier = Modifier.clickable(onClick = onTranslate))
                 }
             }
@@ -581,15 +586,15 @@ private fun Hint(text: String, palette: AbyssPalette) {
     Text(text, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
 }
 
-private fun langName(tag: String?): String =
-    tag?.let { com.abyss.app.core.translate.Languages.name(it) } ?: "another language"
+private fun langName(S: Strings, tag: String?): String =
+    tag?.let { S.languageNameInline(it) } ?: S.anotherLanguage
 
 @Composable
 private fun Thinking(palette: AbyssPalette) {
     val tr = rememberInfiniteTransition(label = "think")
     val a by tr.animateFloat(0.35f, 1f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "a")
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-        Text("Thinking", color = palette.onSurface.copy(alpha = a), fontFamily = AbyssFonts.Reading,
+        Text(LocalStrings.current.thinking, color = palette.onSurface.copy(alpha = a), fontFamily = AbyssFonts.Reading,
             fontSize = 16.sp)
         Spacer(Modifier.width(4.dp))
         repeat(3) { i ->
@@ -626,9 +631,12 @@ private fun Composer(
         if (focused) palette.primary.copy(alpha = 0.45f) else palette.outline, tween(250), label = "border")
     // A light glint that travels around the border while the field is focused.
     // Read only in the draw phase, so it never recomposes the composer.
-    val glintT = rememberInfiniteTransition(label = "glint")
-    val glint = glintT.animateFloat(0f, 1f, infiniteRepeatable(tween(2600)), label = "g")
     val glintAlpha by animateFloatAsState(if (focused) 1f else 0f, tween(300), label = "ga")
+    // The infinite glint clock only exists while it's visible — no idle frame cost.
+    val glint = if (focused || glintAlpha > 0.01f) {
+        rememberInfiniteTransition(label = "glint")
+            .animateFloat(0f, 1f, infiniteRepeatable(tween(2600)), label = "g")
+    } else null
 
     Column(
         Modifier.fillMaxWidth()
@@ -637,7 +645,7 @@ private fun Composer(
             .border(1.dp, border, RoundedCornerShape(24.dp))
             .drawWithContent {
                 drawContent()
-                if (glintAlpha > 0.01f) {
+                if (glint != null && glintAlpha > 0.01f) {
                     val w = size.width
                     val x = -w * 0.5f + glint.value * w * 2f
                     drawRoundRect(
@@ -660,13 +668,13 @@ private fun Composer(
             return@Column
         }
         if (state.transcribing) {
-            Text("Transcribing…", color = palette.primary, fontSize = 12.sp,
+            Text(LocalStrings.current.transcribing, color = palette.primary, fontSize = 12.sp,
                 modifier = Modifier.padding(start = 18.dp, top = 12.dp))
         }
         Box(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 6.dp)) {
             if (state.input.isEmpty()) {
                 Text(
-                    if (hero) "How can I help you today?" else "Reply…",
+                    if (hero) LocalStrings.current.composerHint else LocalStrings.current.replyHint,
                     color = palette.onSurface.copy(alpha = 0.42f), fontSize = 16.sp,
                 )
             }
@@ -714,7 +722,7 @@ private fun Composer(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(if (state.isBusy) Icons.Filled.Stop else Icons.Filled.ArrowUpward,
-                    if (state.isBusy) "Stop" else "Send", tint = palette.onPrimary, modifier = Modifier.size(20.dp))
+                    if (state.isBusy) LocalStrings.current.stop else LocalStrings.current.send, tint = palette.onPrimary, modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -752,12 +760,12 @@ private fun RecordingRow(palette: AbyssPalette, onCancel: () -> Unit, onSend: ()
                     .background(palette.primary.copy(alpha = 0.8f)))
             }
         }
-        Text("Cancel", color = palette.onSurface.copy(alpha = 0.7f), fontSize = 14.sp,
+        Text(LocalStrings.current.cancel, color = palette.onSurface.copy(alpha = 0.7f), fontSize = 14.sp,
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onCancel).padding(8.dp))
         Spacer(Modifier.width(6.dp))
         Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(palette.primary)
             .clickable(onClick = onSend), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.ArrowUpward, "Send", tint = palette.onPrimary, modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.ArrowUpward, LocalStrings.current.send, tint = palette.onPrimary, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -778,7 +786,7 @@ private fun ConversationDrawer(
     ModalDrawerSheet(drawerContainerColor = palette.background, drawerContentColor = palette.onBackground) {
         Column(Modifier.fillMaxHeight().statusBarsPadding().padding(horizontal = 14.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp)) {
-                AbyssMark(palette, size = 26.dp)
+                AbyssMark(palette, size = 26.dp, animated = false)
                 Spacer(Modifier.width(10.dp))
                 Text("Abyss", color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 24.sp)
             }
@@ -792,13 +800,13 @@ private fun ConversationDrawer(
                     Icon(Icons.Filled.Add, null, tint = palette.onPrimary, modifier = Modifier.size(16.dp))
                 }
                 Spacer(Modifier.width(12.dp))
-                Text("New chat", color = palette.primary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(LocalStrings.current.newChat, color = palette.primary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             }
             Spacer(Modifier.size(14.dp))
-            Text("Recents", color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp,
+            Text(LocalStrings.current.recents, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp,
                 modifier = Modifier.padding(start = 10.dp, bottom = 6.dp))
             if (conversations.isEmpty()) {
-                Text("Your chats will appear here.", color = palette.onSurface.copy(alpha = 0.4f), fontSize = 13.sp,
+                Text(LocalStrings.current.chatsEmpty, color = palette.onSurface.copy(alpha = 0.4f), fontSize = 13.sp,
                     modifier = Modifier.padding(start = 10.dp, top = 6.dp))
             }
             LazyColumn(Modifier.weight(1f)) {
@@ -808,8 +816,8 @@ private fun ConversationDrawer(
                 }
             }
             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(1.dp).background(palette.outline))
-            DrawerItem(Icons.Filled.Palette, "Themes", palette, onThemes)
-            DrawerItem(Icons.Filled.Settings, "Settings", palette, onSettings)
+            DrawerItem(Icons.Filled.Palette, LocalStrings.current.themes, palette, onThemes)
+            DrawerItem(Icons.Filled.Settings, LocalStrings.current.settings, palette, onSettings)
         }
     }
 }
@@ -827,22 +835,22 @@ private fun DrawerItem(icon: ImageVector, label: String, palette: AbyssPalette, 
     }
 }
 
-private fun conversationLabel(c: com.abyss.app.core.data.ConversationSummary): String {
+private fun conversationLabel(S: Strings, c: com.abyss.app.core.data.ConversationSummary): String {
     val t = c.title?.trim()?.replace('\n', ' ')
     if (!t.isNullOrEmpty()) return t
     val ms = c.conversationId.removePrefix("conv_").toLongOrNull() ?: c.lastAt
-    return "Chat · " + SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(ms))
+    return S.chatFallback + " · " + SimpleDateFormat(android.text.format.DateFormat.getBestDateTimePattern(S.locale, "dMMMHHmm"), S.locale).format(Date(ms))
 }
 
-private fun relativeTime(ms: Long): String {
+private fun relativeTime(S: Strings, ms: Long): String {
     val diff = System.currentTimeMillis() - ms
     val min = diff / 60_000
     return when {
-        min < 1 -> "now"
-        min < 60 -> "${min}m"
-        min < 60 * 24 -> "${min / 60}h"
-        min < 60 * 24 * 7 -> "${min / (60 * 24)}d"
-        else -> SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(ms))
+        min < 1 -> S.timeNow
+        min < 60 -> S.minutesShort(min)
+        min < 60 * 24 -> S.hoursShort(min / 60)
+        min < 60 * 24 * 7 -> S.daysShort(min / (60 * 24))
+        else -> SimpleDateFormat(android.text.format.DateFormat.getBestDateTimePattern(S.locale, "dMMM"), S.locale).format(Date(ms))
     }
 }
 
@@ -853,6 +861,7 @@ private fun DrawerChatRow(
     onPick: () -> Unit, onDelete: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val S = LocalStrings.current
     Box {
         Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
@@ -865,13 +874,13 @@ private fun DrawerChatRow(
                 tint = if (selected) palette.primary else palette.onSurface.copy(alpha = 0.45f),
                 modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(10.dp))
-            Text(conversationLabel(c), color = palette.onSurface, fontSize = 14.sp,
+            Text(conversationLabel(S, c), color = palette.onSurface, fontSize = 14.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
-            Text(relativeTime(c.lastAt), color = palette.onSurface.copy(alpha = 0.38f), fontSize = 11.sp)
+            Text(relativeTime(S, c.lastAt), color = palette.onSurface.copy(alpha = 0.38f), fontSize = 11.sp)
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text("Delete chat", color = palette.error) },
+            DropdownMenuItem(text = { Text(S.deleteChat, color = palette.error) },
                 onClick = { menu = false; onDelete() })
         }
     }

@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.perms
 
+import com.abyss.app.ui.i18n.LocalStrings
+
 import android.app.AlarmManager
 import android.app.role.RoleManager
 import android.content.Context
@@ -47,16 +49,17 @@ import com.abyss.app.ui.theme.AbyssPalette
 
 private data class RuntimePerm(val permission: String, val title: String, val why: String)
 
-private val RUNTIME_PERMS = buildList {
-    add(RuntimePerm(android.Manifest.permission.POST_NOTIFICATIONS, "Notifications", "Alarms & caller warnings"))
-    add(RuntimePerm(android.Manifest.permission.RECORD_AUDIO, "Microphone", "Voice messages (Stage 2)"))
-    add(RuntimePerm(android.Manifest.permission.CAMERA, "Camera", "Video & circles (Stage 2)"))
-    add(RuntimePerm(android.Manifest.permission.READ_CONTACTS, "Contacts", "Know which callers are unknown"))
-    add(RuntimePerm(android.Manifest.permission.READ_PHONE_STATE, "Phone state", "Detect incoming calls"))
-}
+private fun runtimePerms(S: com.abyss.app.ui.i18n.Strings) = listOf(
+    RuntimePerm(android.Manifest.permission.POST_NOTIFICATIONS, S.permNotifications, S.permNotificationsWhy),
+    RuntimePerm(android.Manifest.permission.RECORD_AUDIO, S.permMic, S.permMicWhy),
+    RuntimePerm(android.Manifest.permission.CAMERA, S.permCamera, S.permCameraWhy),
+    RuntimePerm(android.Manifest.permission.READ_CONTACTS, S.permContacts, S.permContactsWhy),
+    RuntimePerm(android.Manifest.permission.READ_PHONE_STATE, S.permPhone, S.permPhoneWhy),
+)
 
 @Composable
 fun PermissionsScreen(palette: AbyssPalette) {
+    val S = LocalStrings.current
     val context = LocalContext.current
     var refresh by remember { mutableIntStateOf(0) }
 
@@ -74,20 +77,20 @@ fun PermissionsScreen(palette: AbyssPalette) {
     refresh.let { }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Grant what you need, individually or all at once.",
+        Text(S.permsIntro,
             color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
         Spacer(Modifier.size(12.dp))
 
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(palette.primary)
-            .clickable { multi.launch(RUNTIME_PERMS.map { it.permission }.toTypedArray()) }
+            .clickable { multi.launch(runtimePerms(S).map { it.permission }.toTypedArray()) }
             .padding(vertical = 14.dp), Alignment.Center) {
-            Text("Request all runtime permissions", color = palette.onPrimary,
+            Text(S.requestAll, color = palette.onPrimary,
                 fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.size(14.dp))
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(RUNTIME_PERMS) { p ->
+            items(runtimePerms(S)) { p ->
                 PermRow(p.title, p.why, granted(p.permission), palette) {
                     single.launch(p.permission)
                 }
@@ -96,27 +99,27 @@ fun PermissionsScreen(palette: AbyssPalette) {
             // Special-access entries.
             item {
                 val ok = UsageAnalyzer(context).hasUsageAccess()
-                PermRow("Usage access", "Estimate wake/sleep for smart alarm", ok, palette) {
+                PermRow(S.permUsage, S.permUsageWhy, ok, palette) {
                     special.launch(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
                 }
             }
             item {
                 val ok = roleHeld(context, RoleManager.ROLE_CALL_SCREENING)
-                PermRow("Call screening role", "Warn about unknown/scam callers", ok, palette) {
+                PermRow(S.permScreening, S.permScreeningWhy, ok, palette) {
                     requestCallScreening(context, special::launch)
                 }
             }
             item {
                 val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                 val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.canScheduleExactAlarms() else true
-                PermRow("Exact alarms", "Fire alarms precisely", ok, palette) {
+                PermRow(S.permExactAlarms, S.permExactAlarmsWhy, ok, palette) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
                         special.launch(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
                             Uri.parse("package:" + context.packageName)))
                 }
             }
             item {
-                PermRow("Ignore battery optimizations", "Keep background learning alive", false, palette) {
+                PermRow(S.permBattery, S.permBatteryWhy, false, palette) {
                     special.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                 }
             }
@@ -126,6 +129,7 @@ fun PermissionsScreen(palette: AbyssPalette) {
 
 @Composable
 private fun PermRow(title: String, why: String, granted: Boolean, palette: AbyssPalette, onRequest: () -> Unit) {
+    val S = LocalStrings.current
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(palette.surface)
         .padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -133,11 +137,11 @@ private fun PermRow(title: String, why: String, granted: Boolean, palette: Abyss
             Text(why, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp)
         }
         if (granted) {
-            Icon(Icons.Filled.CheckCircle, "Granted", tint = palette.primary)
+            Icon(Icons.Filled.CheckCircle, S.granted, tint = palette.primary)
         } else {
             Box(Modifier.clip(RoundedCornerShape(10.dp)).background(palette.surfaceVariant)
                 .clickable(onClick = onRequest).padding(horizontal = 14.dp, vertical = 8.dp)) {
-                Text("Grant", color = palette.primary, fontSize = 13.sp)
+                Text(S.grant, color = palette.primary, fontSize = 13.sp)
             }
         }
     }

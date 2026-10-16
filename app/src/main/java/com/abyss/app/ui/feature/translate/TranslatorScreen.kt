@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.translate
 
+import com.abyss.app.ui.i18n.LocalStrings
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
@@ -51,6 +53,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun TranslatorScreen(palette: AbyssPalette) {
+    val S = LocalStrings.current
     val settings by ServiceLocator.settings.settings.collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -71,7 +74,7 @@ fun TranslatorScreen(palette: AbyssPalette) {
             .verticalScroll(scroll).padding(16.dp),
     ) {
         Text(
-            "On-device · works offline" + if (engine == "llm") " · using your model" else "",
+            S.translatorSubtitle(engine == "llm"),
             color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp)
         Spacer(Modifier.size(16.dp))
 
@@ -82,12 +85,12 @@ fun TranslatorScreen(palette: AbyssPalette) {
                 value = input,
                 onValueChange = { input = it; error = null },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
-                placeholder = { Text("Enter text…", color = palette.onSurface.copy(alpha = 0.4f)) },
+                placeholder = { Text(S.enterText, color = palette.onSurface.copy(alpha = 0.4f)) },
                 colors = transparentFieldColors(palette),
             )
         }
         detected?.let {
-            Text("Detected: ${Languages.name(it)}", color = palette.primary.copy(alpha = 0.8f),
+            Text(S.detected(S.languageName(it)), color = palette.primary.copy(alpha = 0.8f),
                 fontSize = 11.sp, fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(top = 4.dp, start = 6.dp))
         }
@@ -103,13 +106,13 @@ fun TranslatorScreen(palette: AbyssPalette) {
                 ) {
                     Icon(Icons.Filled.SwapVert, null, tint = palette.primary)
                     Spacer(Modifier.size(6.dp))
-                    Text("to ${Languages.name(target)}", color = palette.onSurface, fontSize = 13.sp)
+                    Text(S.toLanguage(S.languageName(target)), color = palette.onSurface, fontSize = 13.sp)
                 }
                 androidx.compose.material3.DropdownMenu(
                     expanded = langMenu, onDismissRequest = { langMenu = false }) {
-                    Languages.list.forEach { (code, name) ->
+                    Languages.list.forEach { (code, _) ->
                         androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(name) },
+                            text = { Text(S.languageName(code)) },
                             onClick = {
                                 scope.launch { ServiceLocator.settings.setTargetLang(code) }
                                 langMenu = false
@@ -141,11 +144,11 @@ fun TranslatorScreen(palette: AbyssPalette) {
                     Spacer(Modifier.size(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            if (engine == "llm") "Translated by your model" else "Translated on-device",
+                            if (engine == "llm") S.translatedByModel else S.translatedOnDevice,
                             color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace)
                         Spacer(Modifier.weight(1f))
-                        Icon(Icons.Filled.ContentCopy, "Copy",
+                        Icon(Icons.Filled.ContentCopy, S.copy,
                             tint = palette.primary,
                             modifier = Modifier.size(18.dp)
                                 .clickable { clipboard.setText(AnnotatedString(output)) })
@@ -162,6 +165,7 @@ fun TranslatorScreen(palette: AbyssPalette) {
 
 @Composable
 private fun TranslateButton(palette: AbyssPalette, busy: Boolean, onClick: () -> Unit) {
+    val S = LocalStrings.current
     Box(
         Modifier.clip(RoundedCornerShape(50)).background(palette.primary)
             .clickable(enabled = !busy, onClick = onClick)
@@ -170,7 +174,7 @@ private fun TranslateButton(palette: AbyssPalette, busy: Boolean, onClick: () ->
     ) {
         if (busy) CircularProgressIndicator(
             color = palette.onPrimary, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-        else Text("Translate", color = palette.onPrimary, fontWeight = FontWeight.SemiBold)
+        else Text(S.translate, color = palette.onPrimary, fontWeight = FontWeight.SemiBold)
     }
 }
 

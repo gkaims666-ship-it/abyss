@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#05060A</color>
+    <color name="ic_launcher_background">#05070D</color>
+    <!-- Window colour before Compose draws: matches the default Abyss theme. -->
+    <color name="abyss_window">#05070D</color>
 </resources>

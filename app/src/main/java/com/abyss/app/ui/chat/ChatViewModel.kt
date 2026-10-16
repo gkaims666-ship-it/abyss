@@ -19,12 +19,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.abyss.app.ui.i18n.I18n
 
 data class UiMessage(
     val id: Long,
     val role: Role,
     val content: String,
-    val agentLabel: String? = null,
+    val agentLabel: String? = null,      // agent id; the UI shows its localised name
     val streaming: Boolean = false,
     val error: Boolean = false,
     // X-style inline translation
@@ -39,7 +40,7 @@ data class ChatUiState(
     val messages: List<UiMessage> = emptyList(),
     val settings: AbyssSettings = AbyssSettings(),
     val isBusy: Boolean = false,
-    val routedAgent: String? = null,
+    val routedAgent: String? = null,     // agent id chosen by Auto
     val input: String = "",
     val recording: Boolean = false,
     val transcribing: Boolean = false,
@@ -81,7 +82,7 @@ class ChatViewModel : ViewModel() {
         _state.update { st ->
             st.copy(messages = history.map {
                 UiMessage(it.id, if (it.role == "user") Role.USER else Role.ASSISTANT,
-                    it.content, it.agentId?.let { aid -> AgentRegistry.byId(aid).name })
+                    it.content, it.agentId?.let { aid -> AgentRegistry.byId(aid).id })
             })
         }
     }
@@ -137,6 +138,7 @@ class ChatViewModel : ViewModel() {
     fun setProvider(id: String) = viewModelScope.launch { settingsStore.setProvider(id) }
     fun setModel(model: String) = viewModelScope.launch { settingsStore.setModel(model) }
     fun toggleHarvest(on: Boolean) = viewModelScope.launch { settingsStore.setHarvest(on) }
+    fun setLanguage(code: String) = viewModelScope.launch { settingsStore.setLanguage(code) }
 
     fun stop() {
         streamJob?.cancel()
@@ -165,7 +167,7 @@ class ChatViewModel : ViewModel() {
         val provider = ProviderRegistry.byId(settings.providerId) ?: ProviderRegistry.openAi
         val apiKey = keyStore.getKey(provider.id)
         if (apiKey == null && provider.id != "local") {
-            emitError("No API key for ${provider.displayName}. Add it in Settings → Keys.")
+            emitError(I18n.current.errNoKey(provider.displayName))
             return
         }
         val key = apiKey ?: ""
@@ -179,7 +181,7 @@ class ChatViewModel : ViewModel() {
         } else {
             AgentRegistry.byId(settings.agentId)
         }
-        _state.update { it.copy(routedAgent = if (settings.agentId == "auto") agent.name else null) }
+        _state.update { it.copy(routedAgent = if (settings.agentId == "auto") agent.id else null) }
 
         // Silent memory injection — never shown in the transcript.
         val memoryBlock = runCatching { memory.contextBlock(text) }.getOrDefault("")
@@ -197,7 +199,7 @@ class ChatViewModel : ViewModel() {
         val assistantId = localIdSeq--
         _state.update {
             it.copy(messages = it.messages + UiMessage(
-                assistantId, Role.ASSISTANT, "", agentLabel = agent.name, streaming = true))
+                assistantId, Role.ASSISTANT, "", agentLabel = agent.id, streaming = true))
         }
 
         val request = LlmRequest(
@@ -218,7 +220,7 @@ class ChatViewModel : ViewModel() {
                 }
             }
         } catch (e: Throwable) {
-            val msg = (e as? LlmError)?.message ?: e.message ?: "Request failed"
+            val msg = (e as? LlmError)?.message ?: e.message ?: I18n.current.errRequestFailed
             _state.update { st ->
                 st.copy(messages = st.messages.map {
                     if (it.id == assistantId)
@@ -296,7 +298,7 @@ class ChatViewModel : ViewModel() {
         if (_state.value.recording || _state.value.isBusy) return
         val ok = runCatching { ServiceLocator.audioRecorder.start() }.isSuccess
         if (ok) _state.update { it.copy(recording = true) }
-        else emitError("Couldn't start recording. Grant the microphone permission in Settings → Permissions.")
+        else emitError(I18n.current.errMic)
     }
 
     fun cancelRecording() {
@@ -316,8 +318,8 @@ class ChatViewModel : ViewModel() {
             _state.update { it.copy(transcribing = false) }
             res.onSuccess { text ->
                 if (text.isNotBlank()) { onInputChange(text); send() }
-                else emitError("Empty transcription.")
-            }.onFailure { emitError(it.message ?: "Transcription failed") }
+                else emitError(I18n.current.errEmptyTranscript)
+            }.onFailure { emitError(it.message ?: I18n.current.errTranscription) }
         }
     }
 
@@ -326,17 +328,18 @@ class ChatViewModel : ViewModel() {
     /** Analyze a captured file and post the model's description/answer. */
     fun analyzeCapturedMedia(path: String, mime: String, kind: String, prompt: String) {
         val file = java.io.File(path)
-        if (!file.exists()) { emitError("Capture missing."); return }
-        val userMsg = UiMessage(localIdSeq--, Role.USER, "[$kind] $prompt")
+        if (!file.exists()) { emitError(I18n.current.errCaptureMissing); return }
+        val kindLabel = I18n.current.mediaKind(kind)
+        val userMsg = UiMessage(localIdSeq--, Role.USER, "[$kindLabel] $prompt")
         val assistantId = localIdSeq--
         _state.update {
             it.copy(messages = it.messages + userMsg +
-                UiMessage(assistantId, Role.ASSISTANT, "", agentLabel = "Media", streaming = true),
-                mediaStatus = "Analyzing $kind…")
+                UiMessage(assistantId, Role.ASSISTANT, "", agentLabel = "media", streaming = true),
+                mediaStatus = I18n.current.analyzing(kindLabel))
         }
         viewModelScope.launch {
             chatDao.insert(ChatMessageEntity(conversationId = convId, role = "user",
-                content = "[$kind] $prompt", providerId = "gemini", model = null, agentId = "media"))
+                content = "[$kindLabel] $prompt", providerId = "gemini", model = null, agentId = "media"))
             val res = ServiceLocator.mediaAI.understand(file, mime, prompt)
             runCatching { file.delete() }
             val text = res.getOrElse { "⚠ ${it.message}" }

@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.calc
 
+import com.abyss.app.ui.i18n.LocalStrings
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -51,6 +53,7 @@ private sealed class Key(val label: String) {
 
 @Composable
 fun CalculatorScreen(palette: AbyssPalette) {
+    val S = LocalStrings.current
     var expr by remember { mutableStateOf("") }
     var result by remember { mutableStateOf("") }
     val history = remember { mutableStateListOf<Pair<String, String>>() }
@@ -72,7 +75,7 @@ fun CalculatorScreen(palette: AbyssPalette) {
                 val r = runCatching { CalcEngine.format(CalcEngine.evaluate(expr)) }
                 r.onSuccess {
                     if (expr.isNotBlank()) { history.add(0, expr to it); expr = it; result = "" }
-                }.onFailure { result = "Error" }
+                }.onFailure { result = S.error }
             }
         }
     }

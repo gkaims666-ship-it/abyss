@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Android 12+ system splash: shows the black-hole mark on the Abyss colour
+      immediately at launch; the in-app intro animation then picks it up.
+    -->
+    <style name="Theme.Abyss" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/abyss_window</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowSplashScreenBackground">@color/abyss_window</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenAnimationDuration">300</item>
+    </style>
+</resources>

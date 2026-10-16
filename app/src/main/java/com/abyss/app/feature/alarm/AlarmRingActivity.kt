@@ -79,9 +79,9 @@ class AlarmRingActivity : ComponentActivity() {
                     Spacer(Modifier.size(48.dp))
                     Row(Modifier.fillMaxWidth().padding(horizontal = 32.dp),
                         horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        ActionButton("Snooze", palette.surfaceVariant, palette.onSurface,
+                        ActionButton(com.abyss.app.ui.i18n.I18n.current.snooze, palette.surfaceVariant, palette.onSurface,
                             Modifier.weight(1f)) { snooze() }
-                        ActionButton("Dismiss", palette.primary, palette.onPrimary,
+                        ActionButton(com.abyss.app.ui.i18n.I18n.current.dismiss, palette.primary, palette.onPrimary,
                             Modifier.weight(1f)) { dismiss() }
                     }
                 }

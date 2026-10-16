@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.core
 
+import com.abyss.app.ui.i18n.LocalStrings
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +45,7 @@ import java.io.File
 
 @Composable
 fun CoreScreen(palette: AbyssPalette) {
+    val S = LocalStrings.current
     val scope = rememberCoroutineScope()
     val settings by ServiceLocator.settings.settings.collectAsState(initial = null)
     val memCount by ServiceLocator.memory.count.collectAsState(initial = 0)
@@ -65,38 +68,36 @@ fun CoreScreen(palette: AbyssPalette) {
     val version = "v1." + improvement.toString().padStart(6, '0')
 
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp)) {
-        Text("Self-improvement engine", color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
+        Text(S.coreSubtitle, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
 
         Spacer(Modifier.size(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatCard("Knowledge", "$memCount", palette, Modifier.weight(1f))
-            StatCard("Improvements", version, palette, Modifier.weight(1f))
+            StatCard(S.knowledge, "$memCount", palette, Modifier.weight(1f))
+            StatCard(S.improvements, version, palette, Modifier.weight(1f))
         }
 
         Spacer(Modifier.size(16.dp))
         // Self-improvement controls
-        SectionTitle("Self-improvement", palette)
-        ToggleRow("Enable background learning", settings?.backgroundHarvest == true, palette) {
+        SectionTitle(S.selfImprovement, palette)
+        ToggleRow(S.enableBgLearning, settings?.backgroundHarvest == true, palette) {
             scope.launch { ServiceLocator.settings.setHarvest(it) }
         }
-        Text("Quietly asks models with keys to teach Abyss new things, stores them to memory " +
-            "(hidden from chat), and reflects offline. Spends tokens when online.",
+        Text(S.bgLearningDesc,
             color = palette.onSurface.copy(alpha = 0.55f), fontSize = 11.sp)
 
         Spacer(Modifier.size(10.dp))
-        PrimaryButton(if (running) "Working…" else "Run one cycle now", palette, enabled = !running) {
+        PrimaryButton(if (running) S.working else S.runCycle, palette, enabled = !running) {
             running = true; status = null
             scope.launch {
                 val h = runCatching { ServiceLocator.harvester.runOnce(settings?.harvestPerRun ?: 3) }.getOrNull()
                 val r = runCatching { ServiceLocator.reflection.runOnce() }.getOrNull()
                 refresh()
                 running = false
-                status = buildString {
-                    append("Harvested ${h?.stored ?: 0}")
-                    if (h?.skippedNoKeys == true) append(" (add API keys to harvest)")
-                    append(" · reflection ")
-                    append(if (r?.stored == true) (if (r.usedLocal) "local" else "online") else "skipped")
-                }
+                status = S.cycleResult(
+                    harvested = h?.stored ?: 0,
+                    needKeys = h?.skippedNoKeys == true,
+                    reflection = if (r?.stored == true) (if (r.usedLocal) 1 else 2) else 0,
+                )
             }
         }
         status?.let { Text(it, color = palette.primary, fontSize = 12.sp,
@@ -104,12 +105,12 @@ fun CoreScreen(palette: AbyssPalette) {
 
         if (recent.isNotEmpty()) {
             Spacer(Modifier.size(16.dp))
-            SectionTitle("Recent knowledge", palette)
+            SectionTitle(S.recentKnowledge, palette)
             recent.forEach { e ->
                 Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)
                     .clip(RoundedCornerShape(12.dp)).background(palette.surface).padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (e.kind == "reflection") "◆ reflection" else "✦ ${e.source}",
+                        Text(if (e.kind == "reflection") "◆ ${S.reflectionTag}" else "✦ ${e.source}",
                             color = palette.secondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                         Spacer(Modifier.weight(1f))
                         Text(e.topic, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 10.sp)
@@ -122,13 +123,11 @@ fun CoreScreen(palette: AbyssPalette) {
 
         Spacer(Modifier.size(20.dp))
         // Local model
-        SectionTitle("Local uncensored model", palette)
+        SectionTitle(S.localModelTitle, palette)
         val nativeOk = ServiceLocator.localModel.nativeAvailable()
-        Text(if (nativeOk) "Native engine present." else
-            "Native engine not in this APK. Build with -PwithLocalLlm to enable on-device model.",
+        Text(if (nativeOk) S.nativePresent else S.nativeMissing,
             color = if (nativeOk) palette.primary else palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
-        Text("Paste a direct GGUF link (HuggingFace). Recommended: an uncensored 7–8B instruct " +
-            "model, Q4_K_M (fits 12 GB RAM). Weights download to the device.",
+        Text(S.ggufHelp,
             color = palette.onSurface.copy(alpha = 0.55f), fontSize = 11.sp,
             modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.size(8.dp))
@@ -139,10 +138,10 @@ fun CoreScreen(palette: AbyssPalette) {
             shape = RoundedCornerShape(12.dp), colors = fieldColors(palette))
         Spacer(Modifier.size(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PrimaryButton("Save link", palette, Modifier.weight(1f)) {
+            PrimaryButton(S.saveLink, palette, Modifier.weight(1f)) {
                 scope.launch { ServiceLocator.settings.setLocalModelUrl(modelUrl) }
             }
-            PrimaryButton("Download", palette, Modifier.weight(1f), enabled = modelUrl.isNotBlank()) {
+            PrimaryButton(S.download, palette, Modifier.weight(1f), enabled = modelUrl.isNotBlank()) {
                 scope.launch {
                     ServiceLocator.localModel.download(modelUrl, modelUrl.substringAfterLast('/'))
                     refresh()
@@ -156,33 +155,33 @@ fun CoreScreen(palette: AbyssPalette) {
                 val frac = if (p.total > 0) p.bytes.toFloat() / p.total else 0f
                 LinearProgressIndicator(progress = { frac.coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(), color = palette.primary)
-                Text("${p.bytes / 1_000_000} / ${p.total / 1_000_000} MB" + if (p.done) " · done" else "",
+                Text("${p.bytes / 1_000_000} / ${p.total / 1_000_000} ${S.mb}" + if (p.done) " · ${S.done}" else "",
                     color = palette.onSurface.copy(alpha = 0.6f), fontSize = 11.sp)
             }
         }
 
         if (models.isNotEmpty()) {
             Spacer(Modifier.size(10.dp))
-            Text("Downloaded models", color = palette.onSurface.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text(S.downloadedModels, color = palette.onSurface.copy(alpha = 0.7f), fontSize = 12.sp)
             models.forEach { file ->
                 val active = settings?.localModelActivePath == file.absolutePath
                 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                     .background(if (active) palette.surfaceVariant else palette.surface)
                     .clickable {
                         scope.launch {
-                            status = "Loading ${file.name}…"
+                            status = S.loadingModel(file.name)
                             val ok = ServiceLocator.localModel.load(file)
                             if (ok) ServiceLocator.settings.setLocalModelActive(file.absolutePath)
-                            status = if (ok) "Loaded ${file.name}" else "Load failed (native engine?)"
+                            status = if (ok) S.loadedModel(file.name) else S.loadFailed
                         }
                     }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(file.name, color = palette.onSurface, fontSize = 13.sp,
                             fontFamily = FontFamily.Monospace)
-                        Text("${file.length() / 1_000_000} MB", color = palette.onSurface.copy(alpha = 0.5f),
+                        Text("${file.length() / 1_000_000} ${S.mb}", color = palette.onSurface.copy(alpha = 0.5f),
                             fontSize = 11.sp)
                     }
-                    if (active) Text("active", color = palette.primary, fontSize = 11.sp)
+                    if (active) Text(S.active, color = palette.primary, fontSize = 11.sp)
                 }
                 Spacer(Modifier.size(6.dp))
             }

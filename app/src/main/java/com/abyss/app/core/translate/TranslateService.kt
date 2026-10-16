@@ -39,8 +39,8 @@ class TranslateService(private val keyStore: KeyStore) {
     ): Result<Translation2> = runCatching {
         val provider = ProviderRegistry.byId(settings.providerId) ?: ProviderRegistry.openAi
         val key = keyStore.getKey(provider.id)
-            ?: if (provider.id == "local") "" else error("No API key for ${provider.displayName}")
-        val targetName = Languages.name(settings.targetLang)
+            ?: if (provider.id == "local") "" else error(com.abyss.app.ui.i18n.I18n.current.errNoKey(provider.displayName))
+        val targetName = java.util.Locale.forLanguageTag(settings.targetLang).getDisplayLanguage(java.util.Locale.ENGLISH).ifBlank { settings.targetLang }
         val out = provider.complete(
             LlmRequest(
                 model = settings.model,

@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore(name = "abyss_settings")
 
 data class AbyssSettings(
-    val paletteId: String = "ember",
+    val paletteId: String = "abyss",
     val providerId: String = "openai",
     val model: String = "gpt-4o",
     val agentId: String = "auto",
@@ -38,6 +38,7 @@ data class AbyssSettings(
     val systemPrompt: String = "",
     // Personalisation
     val userName: String = "",
+    val language: String = "system",          // "system" or a UI language code
 )
 
 class SettingsStore(private val context: Context) {
@@ -62,11 +63,12 @@ class SettingsStore(private val context: Context) {
         val temperature = floatPreferencesKey("temperature")
         val systemPrompt = stringPreferencesKey("system_prompt")
         val userName = stringPreferencesKey("user_name")
+        val language = stringPreferencesKey("language")
     }
 
     val settings: Flow<AbyssSettings> = context.dataStore.data.map { p ->
         AbyssSettings(
-            paletteId = p[Keys.palette] ?: "ember",
+            paletteId = p[Keys.palette] ?: "abyss",
             providerId = p[Keys.provider] ?: "openai",
             model = p[Keys.model] ?: "gpt-4o",
             agentId = p[Keys.agent] ?: "auto",
@@ -85,6 +87,7 @@ class SettingsStore(private val context: Context) {
             temperature = p[Keys.temperature] ?: 0.7f,
             systemPrompt = p[Keys.systemPrompt] ?: "",
             userName = p[Keys.userName] ?: "",
+            language = p[Keys.language] ?: "system",
         )
     }
 
@@ -108,6 +111,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setTemperature(t: Float) = context.dataStore.edit { it[Keys.temperature] = t }
     suspend fun setSystemPrompt(s: String) = context.dataStore.edit { it[Keys.systemPrompt] = s }
     suspend fun setUserName(n: String) = context.dataStore.edit { it[Keys.userName] = n.trim() }
+    suspend fun setLanguage(code: String) = context.dataStore.edit { it[Keys.language] = code }
     suspend fun toggleMutedLang(code: String) = context.dataStore.edit { p ->
         val cur = p[Keys.mutedLangs] ?: emptySet()
         p[Keys.mutedLangs] = if (code in cur) cur - code else cur + code

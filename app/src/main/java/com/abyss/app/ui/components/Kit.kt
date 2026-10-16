@@ -72,7 +72,7 @@ fun BackBar(title: String, palette: AbyssPalette, onBack: () -> Unit) {
             Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = palette.onBackground.copy(alpha = 0.85f),
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, com.abyss.app.ui.i18n.LocalStrings.current.back, tint = palette.onBackground.copy(alpha = 0.85f),
                 modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.width(4.dp))

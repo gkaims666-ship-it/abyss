@@ -15,9 +15,9 @@ data class ScamResult(
 ) {
     /** Short analytics line for the warning notification. */
     fun summary(): String = when (risk) {
-        ScamRisk.HIGH -> "High risk. " + reasons.joinToString("; ")
-        ScamRisk.MEDIUM -> "Be cautious. " + reasons.joinToString("; ")
-        ScamRisk.LOW -> "Low risk. " + reasons.joinToString("; ")
+        ScamRisk.HIGH -> com.abyss.app.ui.i18n.I18n.current.riskHigh + reasons.joinToString("; ")
+        ScamRisk.MEDIUM -> com.abyss.app.ui.i18n.I18n.current.riskMedium + reasons.joinToString("; ")
+        ScamRisk.LOW -> com.abyss.app.ui.i18n.I18n.current.riskLow + reasons.joinToString("; ")
     }
 }
 
@@ -47,21 +47,21 @@ class ScamLookup(private val context: Context) {
         var score = 0
 
         if (number.isBlank()) {
-            return ScamResult("Private/Unknown", ScamRisk.MEDIUM,
-                listOf("Hidden or withheld caller ID — common for unwanted calls"))
+            return ScamResult(com.abyss.app.ui.i18n.I18n.current.privateNumber, ScamRisk.MEDIUM,
+                listOf(com.abyss.app.ui.i18n.I18n.current.reasonHidden))
         }
 
         val digits = number.filter { it.isDigit() }
         // Heuristics.
-        if (digits.length <= 6) { score += 2; reasons += "Unusually short number (often shortcodes/robocalls)" }
+        if (digits.length <= 6) { score += 2; reasons += com.abyss.app.ui.i18n.I18n.current.reasonShort }
         if (number.startsWith("+") && !number.startsWith(localPrefixGuess())) {
-            score += 1; reasons += "International number not matching your region"
+            score += 1; reasons += com.abyss.app.ui.i18n.I18n.current.reasonInternational
         }
         if (digits.startsWith("900") || digits.startsWith("809")) {
-            score += 2; reasons += "Premium-rate prefix"
+            score += 2; reasons += com.abyss.app.ui.i18n.I18n.current.reasonPremium
         }
         if (digits.toSet().size <= 2 && digits.length >= 6) {
-            score += 1; reasons += "Repetitive digit pattern"
+            score += 1; reasons += com.abyss.app.ui.i18n.I18n.current.reasonRepetitive
         }
 
         // Optional external data source.
@@ -71,12 +71,12 @@ class ScamLookup(private val context: Context) {
                 val resp = Http.client.newCall(Request.Builder().url(url).build()).execute()
                 val body = resp.use { it.body?.string().orEmpty() }.lowercase()
                 if (listOf("scam", "fraud", "spam", "мошен", "fraude").any { body.contains(it) }) {
-                    score += 3; reasons += "Reported in your configured data source"
+                    score += 3; reasons += com.abyss.app.ui.i18n.I18n.current.reasonReported
                 }
             }
         }
 
-        if (reasons.isEmpty()) reasons += "No risk signals found"
+        if (reasons.isEmpty()) reasons += com.abyss.app.ui.i18n.I18n.current.reasonNone
         val risk = when {
             score >= 3 -> ScamRisk.HIGH
             score >= 1 -> ScamRisk.MEDIUM

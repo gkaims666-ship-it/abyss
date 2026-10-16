@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.vpn
 
+import com.abyss.app.ui.i18n.LocalStrings
+
 import android.net.VpnService
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -50,6 +52,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun VpnScreen(palette: AbyssPalette) {
+    val S = LocalStrings.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = ServiceLocator.vpnStore
@@ -81,8 +84,7 @@ fun VpnScreen(palette: AbyssPalette) {
 
     Column(Modifier.fillMaxSize()
         .verticalScroll(scroll).padding(16.dp)) {
-        Text(if (VpnBridge.available) "Xray-core engine ready"
-            else "Engine not in this APK — build with -PwithVpn to enable",
+        Text(if (VpnBridge.available) S.vpnReady else S.vpnMissing,
             color = if (VpnBridge.available) palette.primary else palette.onSurface.copy(alpha = 0.6f),
             fontSize = 12.sp)
 
@@ -90,7 +92,7 @@ fun VpnScreen(palette: AbyssPalette) {
         StatusCard(status, palette) { VpnController.disconnect(context) }
 
         Spacer(Modifier.size(16.dp))
-        Text("Subscription URL", color = palette.primary, fontWeight = FontWeight.Bold,
+        Text(S.subscriptionUrl, color = palette.primary, fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace, fontSize = 14.sp)
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextField(value = sub, onValueChange = { sub = it }, modifier = Modifier.weight(1f),
@@ -98,35 +100,35 @@ fun VpnScreen(palette: AbyssPalette) {
                     color = palette.onSurface.copy(alpha = 0.4f)) },
                 shape = RoundedCornerShape(12.dp), colors = fieldColors(palette))
             Spacer(Modifier.size(8.dp))
-            Btn("Import", palette) {
+            Btn(S.importAction, palette) {
                 scope.launch {
-                    busyMsg = "Fetching…"
+                    busyMsg = S.fetching
                     store.setSubscriptionUrl(sub)
                     val parsed = SubscriptionParser.fetchSubscription(sub)
                     if (parsed.isNotEmpty()) store.saveServers(merge(servers, parsed))
-                    busyMsg = "Imported ${parsed.size} servers"
+                    busyMsg = S.importedServers(parsed.size)
                 }
             }
         }
 
         Spacer(Modifier.size(12.dp))
-        Text("Or paste links (vmess/vless/trojan/ss)", color = palette.onSurface.copy(alpha = 0.7f),
+        Text(S.orPasteLinks, color = palette.onSurface.copy(alpha = 0.7f),
             fontSize = 12.sp)
         TextField(value = pasteLinks, onValueChange = { pasteLinks = it },
-            modifier = Modifier.fillMaxWidth(), placeholder = { Text("one per line",
+            modifier = Modifier.fillMaxWidth(), placeholder = { Text(S.onePerLine,
                 color = palette.onSurface.copy(alpha = 0.4f)) },
             shape = RoundedCornerShape(12.dp), colors = fieldColors(palette))
         Spacer(Modifier.size(8.dp))
-        Btn("Add pasted", palette) {
+        Btn(S.addPasted, palette) {
             val parsed = SubscriptionParser.parseMany(pasteLinks)
             if (parsed.isNotEmpty()) scope.launch { store.saveServers(merge(servers, parsed)); pasteLinks = "" }
-            busyMsg = "Added ${parsed.size}"
+            busyMsg = S.addedServers(parsed.size)
         }
         busyMsg?.let { Text(it, color = palette.primary, fontSize = 12.sp,
             fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 6.dp)) }
 
         Spacer(Modifier.size(16.dp))
-        Text("Servers (${servers.size})", color = palette.primary, fontWeight = FontWeight.Bold,
+        Text(S.serversCount(servers.size), color = palette.primary, fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace, fontSize = 14.sp)
         Spacer(Modifier.size(8.dp))
         servers.forEach { s ->
@@ -149,11 +151,12 @@ private fun merge(old: List<VpnServer>, new: List<VpnServer>): List<VpnServer> {
 
 @Composable
 private fun StatusCard(status: VpnStatus, palette: AbyssPalette, onDisconnect: () -> Unit) {
+    val S = LocalStrings.current
     val (text, color) = when (status) {
-        is VpnStatus.Connected -> "Connected · ${status.label}" to palette.primary
-        VpnStatus.Connecting -> "Connecting…" to palette.secondary
-        is VpnStatus.Error -> "Error: ${status.message}" to palette.error
-        VpnStatus.Disconnected -> "Disconnected" to palette.onSurface.copy(alpha = 0.6f)
+        is VpnStatus.Connected -> S.vpnConnected(status.label) to palette.primary
+        VpnStatus.Connecting -> S.vpnConnecting to palette.secondary
+        is VpnStatus.Error -> S.vpnError(status.message) to palette.error
+        VpnStatus.Disconnected -> S.vpnDisconnected to palette.onSurface.copy(alpha = 0.6f)
     }
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(palette.surface).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
@@ -161,7 +164,7 @@ private fun StatusCard(status: VpnStatus, palette: AbyssPalette, onDisconnect: (
         Spacer(Modifier.size(10.dp))
         Text(text, color = palette.onSurface, modifier = Modifier.weight(1f), fontSize = 14.sp)
         if (status is VpnStatus.Connected || status is VpnStatus.Connecting) {
-            Btn("Disconnect", palette, onDisconnect)
+            Btn(S.disconnect, palette, onDisconnect)
         }
     }
 }

@@ -36,7 +36,7 @@ class MediaAI(private val keyStore: KeyStore) {
             val openAiKey = keyStore.getKey("openai")
             if (openAiKey != null) transcribeOpenAi(file, openAiKey)
             else {
-                val g = keyStore.getKey("gemini") ?: error("Set an OpenAI or Gemini key to transcribe")
+                val g = keyStore.getKey("gemini") ?: error(com.abyss.app.ui.i18n.I18n.current.errNeedTranscribeKey)
                 understandGemini(file, "audio/mp4", "Transcribe this audio verbatim.", g)
             }
         }
@@ -46,7 +46,7 @@ class MediaAI(private val keyStore: KeyStore) {
         withContext(Dispatchers.IO) {
             runCatching {
                 val g = keyStore.getKey("gemini")
-                    ?: error("Set a Gemini key to analyze audio/video/images")
+                    ?: error(com.abyss.app.ui.i18n.I18n.current.errNeedGeminiKey)
                 understandGemini(file, mime, prompt, g)
             }
         }
@@ -63,9 +63,9 @@ class MediaAI(private val keyStore: KeyStore) {
             .post(body).build()
         Http.client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) error("Transcription failed (${resp.code})")
+            if (!resp.isSuccessful) error("${com.abyss.app.ui.i18n.I18n.current.errTranscription} (${resp.code})")
             return Http.json.parseToJsonElement(text).jsonObject["text"]
-                ?.jsonPrimitive?.content ?: error("No transcript")
+                ?.jsonPrimitive?.content ?: error(com.abyss.app.ui.i18n.I18n.current.errEmptyTranscript)
         }
     }
 
@@ -92,13 +92,13 @@ class MediaAI(private val keyStore: KeyStore) {
             .post(payload.toRequestBody("application/json".toMediaType())).build()
         Http.client.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) error("Analysis failed (${resp.code})")
+            if (!resp.isSuccessful) error("${com.abyss.app.ui.i18n.I18n.current.errAnalysis} (${resp.code})")
             val obj = Http.json.parseToJsonElement(text).jsonObject
             val parts = obj["candidates"]?.jsonArray?.firstOrNull()
                 ?.jsonObject?.get("content")?.jsonObject?.get("parts")?.jsonArray
             return parts?.joinToString("") {
                 it.jsonObject["text"]?.jsonPrimitive?.content.orEmpty()
-            }?.ifBlank { "(no description returned)" } ?: error("No analysis returned")
+            }?.ifBlank { com.abyss.app.ui.i18n.I18n.current.errNoAnalysis } ?: error(com.abyss.app.ui.i18n.I18n.current.errNoAnalysis)
         }
     }
 }

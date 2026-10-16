@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.camera
 
+import com.abyss.app.ui.i18n.LocalStrings
+
 import android.content.pm.PackageManager
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -57,7 +59,10 @@ import com.abyss.app.ui.theme.AbyssPalette
 import java.io.File
 import java.util.concurrent.Executors
 
-private enum class Mode(val label: String) { Photo("Photo"), Video("Video"), Circle("Circle") }
+private enum class Mode(val kind: String) {
+    Photo("photo"), Video("video"), Circle("circle");
+    fun label(S: com.abyss.app.ui.i18n.Strings) = S.mediaKind(kind)
+}
 
 /**
  * Camera capture for photos, video and round "circle" clips. On capture the
@@ -69,6 +74,7 @@ fun CameraCaptureScreen(
     onClose: () -> Unit,
     onCaptured: (path: String, mime: String, kind: String) -> Unit,
 ) {
+    val S = LocalStrings.current
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember { PreviewView(context) }
@@ -147,10 +153,10 @@ fun CameraCaptureScreen(
 
         // Top bar
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Close, "Close", tint = Color.White,
+            Icon(Icons.Filled.Close, S.close, tint = Color.White,
                 modifier = Modifier.size(32.dp).clickable { activeRecording?.stop(); onClose() })
             Spacer(Modifier.weight(1f))
-            Icon(Icons.Filled.Cameraswitch, "Flip", tint = Color.White,
+            Icon(Icons.Filled.Cameraswitch, S.flip, tint = Color.White,
                 modifier = Modifier.size(32.dp).clickable { if (!recording) lensBack = !lensBack })
         }
 
@@ -164,7 +170,7 @@ fun CameraCaptureScreen(
                         Box(Modifier.clip(RoundedCornerShape(50))
                             .background(if (sel) palette.primary else Color.White.copy(alpha = 0.2f))
                             .clickable { mode = m }.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            Text(m.label, color = if (sel) palette.onPrimary else Color.White, fontSize = 13.sp)
+                            Text(m.label(S), color = if (sel) palette.onPrimary else Color.White, fontSize = 13.sp)
                         }
                     }
                 }
@@ -187,7 +193,7 @@ fun CameraCaptureScreen(
                 if (recording) Box(Modifier.size(26.dp).clip(RoundedCornerShape(6.dp)).background(Color.White))
             }
             Spacer(Modifier.size(8.dp))
-            Text(if (recording) "Recording — tap to stop" else mode.label,
+            Text(if (recording) S.recordingTapToStop else mode.label(S),
                 color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
         }

@@ -42,10 +42,10 @@ class AbyssCallScreeningService : CallScreeningService() {
     private fun notifyWarning(result: ScamResult) {
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Caller warnings", NotificationManager.IMPORTANCE_HIGH))
+            NotificationChannel(CHANNEL, com.abyss.app.ui.i18n.I18n.current.guardChannel, NotificationManager.IMPORTANCE_HIGH))
         val title = when (result.risk) {
-            ScamRisk.HIGH -> "⚠ Likely scam caller"
-            else -> "⚠ Unknown caller — be cautious"
+            ScamRisk.HIGH -> com.abyss.app.ui.i18n.I18n.current.likelyScam
+            else -> com.abyss.app.ui.i18n.I18n.current.unknownCaution
         }
         val notif = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_warning)

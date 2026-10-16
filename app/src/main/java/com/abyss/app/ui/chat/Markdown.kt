@@ -161,9 +161,9 @@ private fun CodeBlock(lang: String, code: String, palette: AbyssPalette) {
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(lang.ifBlank { "code" }, color = palette.onSurface.copy(alpha = 0.55f),
+            Text(lang.ifBlank { com.abyss.app.ui.i18n.LocalStrings.current.codeLabel }, color = palette.onSurface.copy(alpha = 0.55f),
                 fontFamily = AbyssFonts.Code, fontSize = 12.sp, modifier = Modifier.weight(1f))
-            Text(if (copied) "Copied" else "Copy", color = palette.primary, fontSize = 12.sp,
+            Text(if (copied) com.abyss.app.ui.i18n.LocalStrings.current.copied else com.abyss.app.ui.i18n.LocalStrings.current.copy, color = palette.primary, fontSize = 12.sp,
                 modifier = Modifier.clickable {
                     clipboard.setText(AnnotatedString(code)); copied = true
                 })

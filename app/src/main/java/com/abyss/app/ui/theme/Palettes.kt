@@ -230,10 +230,10 @@ object Palettes {
     )
 
     val all: List<AbyssPalette> = listOf(
-        Ember, Ivory, Abyss, Crimson, CatppuccinMocha, TokyoNight, Nord, RosePine, Gruvbox, Daylight,
+        Abyss, Ember, Ivory, Crimson, CatppuccinMocha, TokyoNight, Nord, RosePine, Gruvbox, Daylight,
     )
 
-    val default: AbyssPalette = Ember
+    val default: AbyssPalette = Abyss
 
     fun byId(id: String?): AbyssPalette = all.firstOrNull { it.id == id } ?: default
 }

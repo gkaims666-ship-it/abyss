@@ -64,7 +64,7 @@ class AlarmReceiver : BroadcastReceiver() {
     private fun showAlarm(context: Context, alarm: AlarmEntity) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(
-            CHANNEL, "Alarms", NotificationManager.IMPORTANCE_HIGH
+            CHANNEL, com.abyss.app.ui.i18n.I18n.current.alarmsChannel, NotificationManager.IMPORTANCE_HIGH
         ).apply { setBypassDnd(true); enableVibration(true) }
         nm.createNotificationChannel(channel)
 
@@ -80,7 +80,7 @@ class AlarmReceiver : BroadcastReceiver() {
 
         val notif = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle(alarm.label.ifBlank { "Alarm" })
+            .setContentTitle(alarm.label.ifBlank { com.abyss.app.ui.i18n.I18n.current.alarm })
             .setContentText(String.format("%02d:%02d", alarm.hour, alarm.minute))
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setPriority(NotificationCompat.PRIORITY_MAX)

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -80,6 +81,9 @@ import com.abyss.app.core.ServiceLocator
 import com.abyss.app.core.provider.LlmProvider
 import com.abyss.app.core.provider.ProviderRegistry
 import com.abyss.app.core.translate.Languages
+import com.abyss.app.ui.i18n.I18n
+import com.abyss.app.ui.i18n.LocalStrings
+import com.abyss.app.ui.i18n.Strings
 import com.abyss.app.ui.chat.ChatViewModel
 import com.abyss.app.ui.chat.PalettePicker
 import com.abyss.app.ui.components.Appear
@@ -117,6 +121,8 @@ fun SettingsScreen(
     var openKey by remember { mutableStateOf<String?>(null) }
     var showThemes by remember { mutableStateOf(false) }
     var langMenu by remember { mutableStateOf(false) }
+    var uiLangMenu by remember { mutableStateOf(false) }
+    val S = LocalStrings.current
     BackHandler(enabled = showThemes) { showThemes = false }
 
     val version = remember {
@@ -128,25 +134,47 @@ fun SettingsScreen(
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
-            ScreenTitle("Settings", palette, subtitle = "Make Abyss yours",
+            ScreenTitle(S.settings, palette, subtitle = S.settingsSubtitle,
                 modifier = Modifier.padding(top = 14.dp))
 
             // ---------------------------------------------------------------- you
             Appear(0) {
                 Column {
-                    SectionLabel("You", palette)
+                    SectionLabel(S.secYou, palette)
                     Group(palette) {
                         var name by remember(s.userName) { mutableStateOf(s.userName) }
                         InputRow(
                             icon = Icons.Filled.Person, palette = palette,
-                            title = "Your name", value = name, placeholder = "What should Abyss call you?",
+                            title = S.yourName, value = name, placeholder = S.yourNameHint,
                             onValueChange = { name = it },
                             onCommit = { scope.launch { store.setUserName(name) } },
                             dirty = name.trim() != s.userName,
                         )
                         Divider(palette)
-                        NavRow(Icons.Filled.Palette, "Theme", palette,
+                        NavRow(Icons.Filled.Palette, S.theme, palette,
                             value = Palettes.byId(s.paletteId).displayName) { showThemes = true }
+                        Divider(palette)
+                        Box {
+                            val systemLang = remember { I18n.fromLocale(java.util.Locale.getDefault()) }
+                            NavRow(Icons.Filled.Language, S.language, palette,
+                                value = if (s.language == "system") S.languageSystem(systemLang.nativeName)
+                                else I18n.all.firstOrNull { it.code == s.language }?.nativeName ?: s.language,
+                            ) { uiLangMenu = true }
+                            DropdownMenu(expanded = uiLangMenu, onDismissRequest = { uiLangMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text(S.languageSystem(systemLang.nativeName),
+                                        fontWeight = if (s.language == "system") FontWeight.SemiBold else FontWeight.Normal) },
+                                    onClick = { vm.setLanguage("system"); uiLangMenu = false },
+                                )
+                                I18n.all.forEach { lang ->
+                                    DropdownMenuItem(
+                                        text = { Text(lang.nativeName,
+                                            fontWeight = if (s.language == lang.code) FontWeight.SemiBold else FontWeight.Normal) },
+                                        onClick = { vm.setLanguage(lang.code); uiLangMenu = false },
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -154,13 +182,13 @@ fun SettingsScreen(
             // ---------------------------------------------------------------- model
             Appear(60) {
                 Column {
-                    SectionLabel("Model", palette)
+                    SectionLabel(S.secModel, palette)
                     Group(palette) {
                         ProviderRegistry.all.forEachIndexed { i, p ->
                             if (i > 0) Divider(palette)
                             val selected = s.providerId == p.id
                             RadioRow(palette, title = p.displayName,
-                                subtitle = if (selected) s.model else statusText(p, keySet[p.id] == true),
+                                subtitle = if (selected) s.model else statusText(S, p, keySet[p.id] == true),
                                 selected = selected) {
                                 vm.setProvider(p.id)
                                 vm.setModel(p.models.firstOrNull() ?: "")
@@ -175,8 +203,8 @@ fun SettingsScreen(
                                     }
                                     Spacer(Modifier.size(10.dp))
                                     var custom by remember(p.id) { mutableStateOf("") }
-                                    CompactField(custom, { custom = it }, "Any model id…", palette,
-                                        action = "Use", enabled = custom.isNotBlank()) {
+                                    CompactField(custom, { custom = it }, S.anyModelId, palette,
+                                        action = S.use, enabled = custom.isNotBlank()) {
                                         vm.setModel(custom.trim()); custom = ""
                                     }
                                 }
@@ -189,7 +217,7 @@ fun SettingsScreen(
             // ---------------------------------------------------------------- keys
             Appear(120) {
                 Column {
-                    SectionLabel("API keys", palette)
+                    SectionLabel(S.secKeys, palette)
                     Group(palette) {
                         ProviderRegistry.all.filter { it.id != "local" }.forEachIndexed { i, p ->
                             if (i > 0) Divider(palette)
@@ -202,8 +230,8 @@ fun SettingsScreen(
                             AnimatedVisibility(openKey == p.id, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                                 Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) {
                                     CompactField(
-                                        keyFields[p.id] ?: "", { keyFields[p.id] = it }, "Paste ${p.displayName} key",
-                                        palette, action = "Save", enabled = !(keyFields[p.id].isNullOrBlank()),
+                                        keyFields[p.id] ?: "", { keyFields[p.id] = it }, S.pasteKey(p.displayName),
+                                        palette, action = S.save, enabled = !(keyFields[p.id].isNullOrBlank()),
                                         secret = true,
                                     ) {
                                         keyStore.setKey(p.id, keyFields[p.id] ?: "")
@@ -211,7 +239,7 @@ fun SettingsScreen(
                                         openKey = null
                                     }
                                     if (has) {
-                                        Text("Remove key", color = palette.error, fontSize = 13.sp,
+                                        Text(S.removeKey, color = palette.error, fontSize = 13.sp,
                                             modifier = Modifier.padding(top = 10.dp).clip(RoundedCornerShape(8.dp))
                                                 .clickable {
                                                     keyStore.clearKey(p.id)
@@ -223,21 +251,21 @@ fun SettingsScreen(
                             }
                         }
                     }
-                    Footnote("Stored encrypted on this device. Never sent anywhere except the provider.", palette)
+                    Footnote(S.keysFootnote, palette)
                 }
             }
 
             // ---------------------------------------------------------------- generation
             Appear(180) {
                 Column {
-                    SectionLabel("Generation", palette)
+                    SectionLabel(S.secGeneration, palette)
                     Group(palette) {
                         // Local value while dragging; persisted once on release.
                         var temp by remember(s.temperature) { mutableFloatStateOf(s.temperature) }
                         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 RowIcon(Icons.Filled.Tune, palette)
-                                Text("Creativity", color = palette.onSurface, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                Text(S.creativity, color = palette.onSurface, fontSize = 15.sp, modifier = Modifier.weight(1f))
                                 Text("%.2f".format(temp), color = palette.primary, fontSize = 14.sp, fontFamily = AbyssFonts.Code)
                             }
                             Slider(
@@ -248,21 +276,21 @@ fun SettingsScreen(
                                     inactiveTrackColor = palette.surfaceVariant),
                             )
                             Row {
-                                Text("Precise", color = palette.onSurface.copy(alpha = 0.45f), fontSize = 11.sp)
+                                Text(S.precise, color = palette.onSurface.copy(alpha = 0.45f), fontSize = 11.sp)
                                 Spacer(Modifier.weight(1f))
-                                Text("Wild", color = palette.onSurface.copy(alpha = 0.45f), fontSize = 11.sp)
+                                Text(S.wild, color = palette.onSurface.copy(alpha = 0.45f), fontSize = 11.sp)
                             }
                         }
                         Divider(palette)
                         var sys by remember(s.systemPrompt) { mutableStateOf(s.systemPrompt) }
                         Column(Modifier.padding(16.dp)) {
-                            Text("Custom instructions", color = palette.onSurface, fontSize = 15.sp)
-                            Text("Added to every conversation", color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+                            Text(S.customInstructions, color = palette.onSurface, fontSize = 15.sp)
+                            Text(S.customInstructionsSub, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
                             Spacer(Modifier.size(10.dp))
-                            MultilineField(sys, { sys = it }, "e.g. Answer in Russian, be concise…", palette)
+                            MultilineField(sys, { sys = it }, S.customInstructionsHint, palette)
                             AnimatedVisibility(sys != s.systemPrompt) {
                                 Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.End) {
-                                    PillButton("Save", palette) { scope.launch { store.setSystemPrompt(sys) } }
+                                    PillButton(S.save, palette) { scope.launch { store.setSystemPrompt(sys) } }
                                 }
                             }
                         }
@@ -273,29 +301,29 @@ fun SettingsScreen(
             // ---------------------------------------------------------------- translator
             Appear(240) {
                 Column {
-                    SectionLabel("Translator", palette)
+                    SectionLabel(S.secTranslator, palette)
                     Group(palette) {
                         Box {
-                            NavRow(Icons.Filled.Translate, "Reading language", palette,
-                                value = Languages.name(s.targetLang)) { langMenu = true }
+                            NavRow(Icons.Filled.Translate, S.readingLanguage, palette,
+                                value = S.languageName(s.targetLang)) { langMenu = true }
                             DropdownMenu(expanded = langMenu, onDismissRequest = { langMenu = false }) {
-                                Languages.list.forEach { (code, name) ->
-                                    DropdownMenuItem(text = { Text(name) }, onClick = {
+                                Languages.list.forEach { (code, _) ->
+                                    DropdownMenuItem(text = { Text(S.languageName(code)) }, onClick = {
                                         scope.launch { store.setTargetLang(code) }; langMenu = false
                                     })
                                 }
                             }
                         }
                         Divider(palette)
-                        SwitchRow(null, "Auto-translate", "Translate foreign replies inline", s.autoTranslate, palette) {
+                        SwitchRow(null, S.autoTranslate, S.autoTranslateSub, s.autoTranslate, palette) {
                             scope.launch { store.setAutoTranslate(it) }
                         }
                         Divider(palette)
                         Column(Modifier.padding(16.dp)) {
-                            Text("Engine", color = palette.onSurface, fontSize = 15.sp)
+                            Text(S.engine, color = palette.onSurface, fontSize = 15.sp)
                             Spacer(Modifier.size(10.dp))
                             Segmented(
-                                options = listOf("mlkit" to "On-device", "llm" to "My model"),
+                                options = listOf("mlkit" to S.engineOnDevice, "llm" to S.engineMyModel),
                                 selected = s.translateEngine, palette = palette,
                             ) { scope.launch { store.setTranslateEngine(it) } }
                         }
@@ -306,24 +334,24 @@ fun SettingsScreen(
             // ---------------------------------------------------------------- privacy & power
             Appear(300) {
                 Column {
-                    SectionLabel("Privacy & power", palette)
+                    SectionLabel(S.secPrivacy, palette)
                     Group(palette) {
-                        NavRow(Icons.Filled.Lock, "Permissions", palette,
-                            value = "Manage", onClick = onOpenPermissions)
+                        NavRow(Icons.Filled.Lock, S.permissions, palette,
+                            value = S.manage, onClick = onOpenPermissions)
                         Divider(palette)
-                        SwitchRow(Icons.Filled.Shield, "Scam call guard", "Warn about unknown callers",
+                        SwitchRow(Icons.Filled.Shield, S.scamGuard, S.scamGuardSub,
                             s.guardEnabled, palette) { scope.launch { store.setGuardEnabled(it) } }
                         AnimatedVisibility(s.guardEnabled, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
                             var url by remember(s.guardLookupUrl) { mutableStateOf(s.guardLookupUrl) }
                             Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 14.dp)) {
-                                CompactField(url, { url = it }, "Optional lookup URL with {number}", palette,
-                                    action = "Save", enabled = url != s.guardLookupUrl) {
+                                CompactField(url, { url = it }, S.lookupUrlHint, palette,
+                                    action = S.save, enabled = url != s.guardLookupUrl) {
                                     scope.launch { store.setGuardUrl(url) }
                                 }
                             }
                         }
                         Divider(palette)
-                        SwitchRow(Icons.Filled.AutoAwesome, "Background learning", "Grows memory quietly · uses tokens",
+                        SwitchRow(Icons.Filled.AutoAwesome, S.backgroundLearning, S.backgroundLearningSub,
                             s.backgroundHarvest, palette) { vm.toggleHarvest(it) }
                     }
                 }
@@ -346,10 +374,10 @@ fun SettingsScreen(
 
 // ==================================================================== building blocks
 
-private fun statusText(p: LlmProvider, hasKey: Boolean): String = when {
-    p.id == "local" -> "On-device model"
-    hasKey -> "Key connected"
-    else -> "No key yet"
+private fun statusText(S: Strings, p: LlmProvider, hasKey: Boolean): String = when {
+    p.id == "local" -> S.providerOnDevice
+    hasKey -> S.keyConnected
+    else -> S.noKeyYet
 }
 
 @Composable
@@ -458,7 +486,7 @@ private fun InputRow(
                     cursorBrush = SolidColor(palette.primary), modifier = Modifier.fillMaxWidth())
             }
         }
-        AnimatedVisibility(dirty) { PillButton("Save", palette, onClick = onCommit) }
+        AnimatedVisibility(dirty) { PillButton(LocalStrings.current.save, palette, onClick = onCommit) }
     }
 }
 
@@ -548,7 +576,7 @@ private fun StatusDot(on: Boolean, palette: AbyssPalette) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(7.dp).clip(CircleShape).background(if (on) Color(0xFF5DBB7B) else palette.outline))
         Spacer(Modifier.width(6.dp))
-        Text(if (on) "Connected" else "Not set", color = palette.onSurface.copy(alpha = 0.55f), fontSize = 13.sp)
+        Text(if (on) LocalStrings.current.connected else LocalStrings.current.notSet, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 13.sp)
     }
 }
 

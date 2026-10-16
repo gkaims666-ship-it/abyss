@@ -58,14 +58,25 @@ import com.abyss.app.ui.feature.notes.NotesScreen
 import com.abyss.app.ui.feature.translate.TranslatorScreen
 import com.abyss.app.ui.feature.vpn.VpnScreen
 import com.abyss.app.ui.theme.AbyssPalette
+import com.abyss.app.ui.i18n.LocalStrings
+import com.abyss.app.ui.i18n.Strings
 
-private enum class Tool(val title: String, val blurb: String, val icon: ImageVector) {
-    Core("Abyss Core", "Self-learning engine and local model", Icons.Filled.AutoAwesome),
-    Translator("Translator", "On-device, works offline", Icons.Filled.Translate),
-    Notes("Notes", "Pin, colour, search", Icons.Filled.Note),
-    Alarms("Alarms", "Smart wake-up rules", Icons.Filled.Alarm),
-    Calculator("Calculator", "Scientific, with history", Icons.Filled.Calculate),
-    Vpn("VPN", "Subscriptions, one tap connect", Icons.Filled.VpnKey),
+private enum class Tool(val icon: ImageVector) {
+    Core(Icons.Filled.AutoAwesome),
+    Translator(Icons.Filled.Translate),
+    Notes(Icons.Filled.Note),
+    Alarms(Icons.Filled.Alarm),
+    Calculator(Icons.Filled.Calculate),
+    Vpn(Icons.Filled.VpnKey);
+
+    fun title(S: Strings) = when (this) {
+        Core -> S.toolCore; Translator -> S.toolTranslator; Notes -> S.toolNotes
+        Alarms -> S.toolAlarms; Calculator -> S.toolCalculator; Vpn -> S.toolVpn
+    }
+    fun blurb(S: Strings) = when (this) {
+        Core -> S.toolCoreBlurb; Translator -> S.toolTranslatorBlurb; Notes -> S.toolNotesBlurb
+        Alarms -> S.toolAlarmsBlurb; Calculator -> S.toolCalculatorBlurb; Vpn -> S.toolVpnBlurb
+    }
 }
 
 @Composable
@@ -89,7 +100,7 @@ fun ToolsHub(palette: AbyssPalette) {
             HubGrid(palette) { open = it }
         } else {
             Column(Modifier.fillMaxSize()) {
-                BackBar(current.title, palette) { open = null }
+                BackBar(current.title(LocalStrings.current), palette) { open = null }
                 Box(Modifier.fillMaxSize()) {
                     when (current) {
                         Tool.Core -> CoreScreen(palette)
@@ -107,6 +118,7 @@ fun ToolsHub(palette: AbyssPalette) {
 
 @Composable
 private fun HubGrid(palette: AbyssPalette, onOpen: (Tool) -> Unit) {
+    val S = LocalStrings.current
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         modifier = Modifier.fillMaxSize(),
@@ -115,7 +127,7 @@ private fun HubGrid(palette: AbyssPalette, onOpen: (Tool) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            ScreenTitle("Tools", palette, subtitle = "Everything Abyss can do beyond the chat")
+            ScreenTitle(S.toolsTitle, palette, subtitle = S.toolsSubtitle)
         }
         itemsIndexed(Tool.entries) { i, tool ->
             Appear(delayMs = 60 * i) {
@@ -133,9 +145,9 @@ private fun HubGrid(palette: AbyssPalette, onOpen: (Tool) -> Unit) {
                         contentAlignment = Alignment.Center,
                     ) { Icon(tool.icon, null, tint = palette.primary, modifier = Modifier.size(21.dp)) }
                     Spacer(Modifier.size(14.dp))
-                    Text(tool.title, color = palette.onSurface, fontWeight = FontWeight.Medium, fontSize = 15.sp)
+                    Text(tool.title(S), color = palette.onSurface, fontWeight = FontWeight.Medium, fontSize = 15.sp)
                     Spacer(Modifier.size(3.dp))
-                    Text(tool.blurb, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.5.sp, lineHeight = 16.sp)
+                    Text(tool.blurb(S), color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.5.sp, lineHeight = 16.sp)
                 }
             }
         }

@@ -62,7 +62,7 @@ class AbyssVpnService : VpnService() {
     private fun start(config: String, label: String) {
         instance = this
         if (!VpnBridge.available) {
-            VpnController.set(VpnStatus.Error("VPN engine not in this APK — build with -PwithVpn"))
+            VpnController.set(VpnStatus.Error(com.abyss.app.ui.i18n.I18n.current.vpnErrNoEngine))
             stopSelf(); return
         }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -74,13 +74,13 @@ class AbyssVpnService : VpnService() {
         }
 
         val fd = establishTun()
-        if (fd == null) { VpnController.set(VpnStatus.Error("Couldn't create tunnel")); stopSelf(); return }
+        if (fd == null) { VpnController.set(VpnStatus.Error(com.abyss.app.ui.i18n.I18n.current.vpnErrTunnel)); stopSelf(); return }
         tun = fd
 
         val cfgFile = File(filesDir, "xray_config.json").apply { writeText(config) }
         val ok = VpnBridge.start(cfgFile.absolutePath, fd.fd, SOCKS_PORT, MTU)
         if (ok) VpnController.set(VpnStatus.Connected(label))
-        else { VpnController.set(VpnStatus.Error("Engine failed to start")); stopAll() }
+        else { VpnController.set(VpnStatus.Error(com.abyss.app.ui.i18n.I18n.current.vpnErrStart)); stopAll() }
     }
 
     private fun establishTun(): ParcelFileDescriptor? = runCatching {
@@ -114,7 +114,7 @@ class AbyssVpnService : VpnService() {
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setContentTitle("Abyss VPN")
-            .setContentText("Connected · $label")
+            .setContentText(com.abyss.app.ui.i18n.I18n.current.vpnConnected(label))
             .setOngoing(true)
             .setContentIntent(pi)
             .build()
