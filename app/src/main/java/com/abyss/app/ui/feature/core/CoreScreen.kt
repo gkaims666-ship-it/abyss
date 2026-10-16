@@ -64,9 +64,7 @@ fun CoreScreen(palette: AbyssPalette) {
     val improvement = settings?.improvementCount ?: 0
     val version = "v1." + improvement.toString().padStart(6, '0')
 
-    Column(Modifier.fillMaxSize().background(palette.background).verticalScroll(scroll).padding(16.dp)) {
-        Text("Abyss Core", color = palette.onBackground, fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace, fontSize = 22.sp)
+    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp)) {
         Text("Self-improvement engine", color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
 
         Spacer(Modifier.size(16.dp))
@@ -210,8 +208,7 @@ private fun StatCard(label: String, value: String, palette: AbyssPalette, modifi
 
 @Composable
 private fun SectionTitle(text: String, palette: AbyssPalette) {
-    Text(text, color = palette.primary, fontWeight = FontWeight.Bold,
-        fontFamily = FontFamily.Monospace, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
+    com.abyss.app.ui.components.SectionLabel(text, palette)
 }
 
 @Composable

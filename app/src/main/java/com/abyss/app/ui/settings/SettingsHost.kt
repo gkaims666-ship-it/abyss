@@ -35,6 +35,7 @@ private enum class SettingsRoute { Main, Permissions }
 @Composable
 fun SettingsHost(vm: ChatViewModel, palette: AbyssPalette) {
     var route by remember { mutableStateOf(SettingsRoute.Main) }
+    androidx.activity.compose.BackHandler(enabled = route != SettingsRoute.Main) { route = SettingsRoute.Main }
 
     AnimatedContent(
         targetState = route,
@@ -51,12 +52,8 @@ fun SettingsHost(vm: ChatViewModel, palette: AbyssPalette) {
         when (current) {
             SettingsRoute.Main -> SettingsScreen(vm, palette,
                 onOpenPermissions = { route = SettingsRoute.Permissions })
-            SettingsRoute.Permissions -> Column(Modifier.fillMaxSize().background(palette.background)) {
-                Row(Modifier.fillMaxWidth().padding(start = 8.dp, top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = palette.onBackground,
-                        modifier = Modifier.size(40.dp).clickable { route = SettingsRoute.Main }.padding(8.dp))
-                }
+            SettingsRoute.Permissions -> Column(Modifier.fillMaxSize()) {
+                com.abyss.app.ui.components.BackBar("Permissions", palette) { route = SettingsRoute.Main }
                 PermissionsScreen(palette)
             }
         }

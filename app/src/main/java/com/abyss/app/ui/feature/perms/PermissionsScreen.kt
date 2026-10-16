@@ -73,9 +73,7 @@ fun PermissionsScreen(palette: AbyssPalette) {
     // read refresh so statuses recompute after returning
     refresh.let { }
 
-    Column(Modifier.fillMaxSize().background(palette.background).padding(16.dp)) {
-        Text("Permissions", color = palette.onBackground, fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace, fontSize = 20.sp)
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Grant what you need, individually or all at once.",
             color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
         Spacer(Modifier.size(12.dp))

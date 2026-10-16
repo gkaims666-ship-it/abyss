@@ -31,7 +31,49 @@ data class AbyssPalette(
 
 object Palettes {
 
-    /** The signature look: deep near-black, cyan/blue glow, drifting glyphs. */
+    /** Default: warm charcoal, cream type, terracotta accent. */
+    val Ember = AbyssPalette(
+        id = "ember",
+        displayName = "Ember",
+        dark = true,
+        background = Color(0xFF1F1E1D),
+        surface = Color(0xFF262624),
+        surfaceVariant = Color(0xFF30302E),
+        primary = Color(0xFFD97757),
+        secondary = Color(0xFFE3A587),
+        onBackground = Color(0xFFFAF9F5),
+        onSurface = Color(0xFFE8E6DF),
+        onPrimary = Color(0xFF1F1E1D),
+        outline = Color(0xFF3E3D39),
+        userBubble = Color(0xFF30302E),
+        assistantBubble = Color(0x00000000),
+        symbol = Color(0xFF6B6A64),
+        wave = Color(0xFFD97757),
+        error = Color(0xFFE5675B),
+    )
+
+    /** Light counterpart: ivory paper, near-black ink, same terracotta. */
+    val Ivory = AbyssPalette(
+        id = "ivory",
+        displayName = "Ivory",
+        dark = false,
+        background = Color(0xFFFAF9F5),
+        surface = Color(0xFFFFFFFF),
+        surfaceVariant = Color(0xFFF0EEE6),
+        primary = Color(0xFFC96442),
+        secondary = Color(0xFFD97757),
+        onBackground = Color(0xFF141413),
+        onSurface = Color(0xFF1F1E1D),
+        onPrimary = Color(0xFFFFFFFF),
+        outline = Color(0xFFE3E0D6),
+        userBubble = Color(0xFFF0EEE6),
+        assistantBubble = Color(0x00000000),
+        symbol = Color(0xFFC9C5B8),
+        wave = Color(0xFFC96442),
+        error = Color(0xFFC0392B),
+    )
+
+    /** The original look: deep near-black, cyan/blue glow, drifting glyphs. */
     val Abyss = AbyssPalette(
         id = "abyss",
         displayName = "Abyss",
@@ -188,10 +230,10 @@ object Palettes {
     )
 
     val all: List<AbyssPalette> = listOf(
-        Abyss, Crimson, CatppuccinMocha, TokyoNight, Nord, RosePine, Gruvbox, Daylight,
+        Ember, Ivory, Abyss, Crimson, CatppuccinMocha, TokyoNight, Nord, RosePine, Gruvbox, Daylight,
     )
 
-    val default: AbyssPalette = Abyss
+    val default: AbyssPalette = Ember
 
     fun byId(id: String?): AbyssPalette = all.firstOrNull { it.id == id } ?: default
 }

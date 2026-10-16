@@ -1,11 +1,13 @@
 package com.abyss.app.ui.feature.notes
 
+import com.abyss.app.ui.components.blockTaps
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,15 +75,14 @@ fun NotesScreen(palette: AbyssPalette) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<NoteEntity?>(null) }
+    androidx.activity.compose.BackHandler(enabled = editing != null) { editing = null }
 
     val filtered = notes.filter {
         query.isBlank() || it.title.contains(query, true) || it.body.contains(query, true)
     }
 
-    Box(Modifier.fillMaxSize().background(palette.background)) {
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Text("Notes", color = palette.onBackground, fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace, fontSize = 20.sp)
             Spacer(Modifier.size(10.dp))
             TextField(
                 value = query, onValueChange = { query = it },
@@ -139,6 +140,7 @@ private fun NoteCard(note: NoteEntity, palette: AbyssPalette, onClick: () -> Uni
     Column(
         Modifier.fillMaxWidth().heightIn(min = 96.dp)
             .clip(RoundedCornerShape(16.dp)).background(noteTint(note.colorIndex, palette))
+            .border(1.dp, if (note.pinned) palette.primary.copy(alpha = 0.6f) else palette.outline, RoundedCornerShape(16.dp))
             .clickable(onClick = onClick).padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -168,7 +170,7 @@ private fun NoteEditor(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                 .background(palette.surface).padding(18.dp)
-                .clickable(enabled = false) {},
+                .blockTaps(),
         ) {
             TextField(value = title, onValueChange = { title = it },
                 placeholder = { Text("Title", color = palette.onSurface.copy(alpha = 0.4f)) },

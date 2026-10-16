@@ -79,10 +79,8 @@ fun VpnScreen(palette: AbyssPalette) {
         else VpnController.connect(context, server)
     }
 
-    Column(Modifier.fillMaxSize().background(palette.background)
+    Column(Modifier.fillMaxSize()
         .verticalScroll(scroll).padding(16.dp)) {
-        Text("VPN", color = palette.onBackground, fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace, fontSize = 22.sp)
         Text(if (VpnBridge.available) "Xray-core engine ready"
             else "Engine not in this APK — build with -PwithVpn to enable",
             color = if (VpnBridge.available) palette.primary else palette.onSurface.copy(alpha = 0.6f),

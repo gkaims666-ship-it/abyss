@@ -77,9 +77,7 @@ fun CalculatorScreen(palette: AbyssPalette) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(palette.background).padding(14.dp)) {
-        Text("Calculator", color = palette.onBackground, fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace, fontSize = 20.sp)
+    Column(Modifier.fillMaxSize().padding(14.dp)) {
 
         // History
         LazyColumn(Modifier.fillMaxWidth().weight(0.9f), reverseLayout = true) {

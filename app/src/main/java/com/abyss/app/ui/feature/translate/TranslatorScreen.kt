@@ -67,11 +67,9 @@ fun TranslatorScreen(palette: AbyssPalette) {
     val scroll = rememberScrollState()
 
     Column(
-        Modifier.fillMaxSize().background(palette.background)
+        Modifier.fillMaxSize()
             .verticalScroll(scroll).padding(16.dp),
     ) {
-        Text("Translator", color = palette.onBackground, fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace, fontSize = 20.sp)
         Text(
             "On-device · works offline" + if (engine == "llm") " · using your model" else "",
             color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp)

@@ -1,70 +1,137 @@
 package com.abyss.app.ui.chat
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.LocalCafe
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.abyss.app.core.agent.AgentRegistry
 import com.abyss.app.core.provider.Role
-import com.abyss.app.ui.background.AbyssAnimatedBackground
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import com.abyss.app.ui.components.AbyssMark
+import com.abyss.app.ui.components.Appear
 import com.abyss.app.ui.feature.camera.CameraCaptureScreen
+import com.abyss.app.ui.theme.AbyssFonts
 import com.abyss.app.ui.theme.AbyssPalette
-import com.abyss.app.ui.theme.Palettes
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun ChatScreen(
@@ -73,147 +140,128 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
 ) {
     val state by vm.state.collectAsState()
-    val listState = rememberLazyListState()
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
     var showPalettes by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(false) }
+    val empty = state.messages.isEmpty()
 
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.content) {
-        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
-    }
+    // System back closes overlays first instead of leaving the app.
+    BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
+    BackHandler(enabled = showPalettes) { showPalettes = false }
+    BackHandler(enabled = showCamera) { showCamera = false }
 
-    Box(Modifier.fillMaxSize()) {
-        AbyssAnimatedBackground(palette = palette)
-
-        Column(Modifier.fillMaxSize()) {
-            TopBar(
+    ModalNavigationDrawer(
+        drawerState = drawer,
+        drawerContent = {
+            ConversationDrawer(
                 palette = palette,
-                agentName = AgentRegistry.byId(state.settings.agentId).name,
-                routed = state.routedAgent,
                 conversations = state.conversations,
-                currentConversation = state.conversationId,
-                onSelectAgent = vm::setAgent,
-                onTogglePalettes = { showPalettes = !showPalettes },
-                onOpenSettings = onOpenSettings,
-                onNewChat = vm::newConversation,
-                onSwitch = vm::switchConversation,
+                current = state.conversationId,
+                onNew = { vm.newConversation(); scope.launch { drawer.close() } },
+                onPick = { vm.switchConversation(it); scope.launch { drawer.close() } },
+                onDelete = { vm.deleteConversation(it) },
+                onThemes = { showPalettes = true; scope.launch { drawer.close() } },
+                onSettings = { onOpenSettings(); scope.launch { drawer.close() } },
             )
+        },
+    ) {
+        // Background + waves are drawn app-wide in MainActivity.
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().imePadding()) {
+                TopBar(
+                    palette = palette,
+                    agentName = AgentRegistry.byId(state.settings.agentId).name,
+                    routed = state.routedAgent,
+                    showNewChat = !empty,
+                    onMenu = { scope.launch { drawer.open() } },
+                    onSelectAgent = vm::setAgent,
+                    onNewChat = vm::newConversation,
+                    onThemes = { showPalettes = true },
+                )
 
-            if (state.messages.isEmpty()) {
-                EmptyState(palette, Modifier.weight(1f))
-            } else {
-                LazyColumn(
-                    state = listState,
+                AnimatedContent(
+                    targetState = empty,
+                    transitionSpec = {
+                        (fadeIn(tween(380)) + slideInVertically(tween(380)) { it / 12 })
+                            .togetherWith(fadeOut(tween(220)))
+                    },
                     modifier = Modifier.weight(1f).fillMaxWidth(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(state.messages, key = { it.id }) { msg ->
-                        MessageBubble(msg, palette,
-                            onTranslate = { vm.translateMessage(msg.id) },
-                            onToggleOriginal = { vm.toggleOriginal(msg.id) },
-                            onDelete = { vm.deleteMessage(msg.id) },
-                            onRegenerate = { vm.regenerate() })
+                    label = "chat-mode",
+                ) { isEmpty ->
+                    if (isEmpty) {
+                        Hero(state = state, palette = palette, vm = vm,
+                            onCamera = { showCamera = true }, onModel = onOpenSettings)
+                    } else {
+                        Conversation(state = state, palette = palette, vm = vm,
+                            onCamera = { showCamera = true }, onModel = onOpenSettings)
                     }
                 }
             }
 
-            state.mediaStatus?.let {
-                Text(it, color = palette.primary, fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(start = 20.dp, bottom = 4.dp))
+            if (showPalettes) {
+                PalettePicker(
+                    current = palette.id,
+                    onPick = { vm.setPalette(it); showPalettes = false },
+                    onDismiss = { showPalettes = false },
+                )
             }
-            InputBar(
-                value = state.input,
-                busy = state.isBusy,
-                recording = state.recording,
-                transcribing = state.transcribing,
-                palette = palette,
-                onChange = vm::onInputChange,
-                onSend = vm::send,
-                onStop = vm::stop,
-                onStartRec = vm::startRecording,
-                onStopRec = vm::stopRecordingAndSend,
-                onCancelRec = vm::cancelRecording,
-                onCamera = { showCamera = true },
-            )
-        }
-
-        if (showPalettes) {
-            PalettePicker(
-                current = palette.id,
-                onPick = { vm.setPalette(it); showPalettes = false },
-                onDismiss = { showPalettes = false },
-            )
-        }
-
-        if (showCamera) {
-            CameraCaptureScreen(
-                palette = palette,
-                onClose = { showCamera = false },
-                onCaptured = { path, mime, kind ->
-                    showCamera = false
-                    vm.analyzeCapturedMedia(path, mime, kind,
-                        "Describe in detail what is happening and what is said or heard.")
-                },
-            )
+            if (showCamera) {
+                CameraCaptureScreen(
+                    palette = palette,
+                    onClose = { showCamera = false },
+                    onCaptured = { path, mime, kind ->
+                        showCamera = false
+                        vm.analyzeCapturedMedia(path, mime, kind,
+                            "Describe in detail what is happening and what is said or heard.")
+                    },
+                )
+            }
         }
     }
 }
+
+// ---------------------------------------------------------------- top bar
 
 @Composable
 private fun TopBar(
     palette: AbyssPalette,
     agentName: String,
     routed: String?,
-    conversations: List<String>,
-    currentConversation: String,
+    showNewChat: Boolean,
+    onMenu: () -> Unit,
     onSelectAgent: (String) -> Unit,
-    onTogglePalettes: () -> Unit,
-    onOpenSettings: () -> Unit,
     onNewChat: () -> Unit,
-    onSwitch: (String) -> Unit,
+    onThemes: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
-    var convMenu by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "Abyss",
-            color = palette.onBackground,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
-        )
-        Spacer(Modifier.size(12.dp))
-
-        // Agent selector
+        IconBtn(Icons.Filled.Menu, "Chats", palette, onMenu)
+        Spacer(Modifier.weight(1f))
         Box {
             Row(
+                Modifier.clip(RoundedCornerShape(50)).clickable { menu = true }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(palette.surfaceVariant.copy(alpha = 0.7f))
-                    .clickable { menu = true }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
             ) {
-                Text(agentName, color = palette.primary, fontSize = 13.sp,
-                    fontFamily = FontFamily.Monospace)
-                if (routed != null && agentName == "Auto") {
-                    Text("  → $routed", color = palette.onSurface.copy(alpha = 0.6f),
-                        fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Text(agentName, color = palette.onBackground, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                AnimatedVisibility(routed != null && agentName == "Auto") {
+                    Text("  · ${routed ?: ""}", color = palette.primary, fontSize = 14.sp)
                 }
-                Icon(Icons.Filled.ArrowDropDown, null, tint = palette.onSurface)
+                Icon(Icons.Filled.KeyboardArrowDown, null, tint = palette.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.size(18.dp))
             }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false },
+                modifier = Modifier.background(palette.surface)) {
                 AgentRegistry.selectable.forEach { a ->
                     DropdownMenuItem(
                         text = {
-                            Column {
-                                Text(a.name, fontWeight = FontWeight.SemiBold)
-                                Text(a.tagline, fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            Column(Modifier.padding(vertical = 2.dp)) {
+                                Text(a.name, color = palette.onSurface, fontWeight = FontWeight.Medium)
+                                Text(a.tagline, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp)
                             }
                         },
                         onClick = { onSelectAgent(a.id); menu = false },
@@ -221,228 +269,634 @@ private fun TopBar(
                 }
             }
         }
-
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = onNewChat) {
-            Icon(Icons.Filled.Add, "New chat", tint = palette.onBackground)
+        if (showNewChat) IconBtn(Icons.Filled.Edit, "New chat", palette, onNewChat)
+        else IconBtn(Icons.Filled.Palette, "Themes", palette, onThemes)
+    }
+}
+
+@Composable
+private fun IconBtn(icon: ImageVector, desc: String, palette: AbyssPalette, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, desc, tint = palette.onBackground.copy(alpha = 0.85f), modifier = Modifier.size(22.dp)) }
+}
+
+// ---------------------------------------------------------------- hero (start page)
+
+private data class Suggestion(val label: String, val icon: ImageVector, val prompt: String)
+
+private val SUGGESTIONS = listOf(
+    Suggestion("Write", Icons.Filled.Edit, "Help me write "),
+    Suggestion("Learn", Icons.Filled.School, "Explain to me "),
+    Suggestion("Code", Icons.Filled.Code, "Help me code "),
+    Suggestion("Life stuff", Icons.Filled.LocalCafe, "I need advice on "),
+    Suggestion("Surprise me", Icons.Filled.AutoAwesome, "Tell me something fascinating about "),
+)
+
+private fun greeting(name: String): String {
+    val h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+    val n = name.trim()
+    return when (h) {
+        in 5..11 -> if (n.isEmpty()) "Good morning" else "Good morning, $n"
+        in 12..17 -> if (n.isEmpty()) "Good afternoon" else "Good afternoon, $n"
+        in 18..22 -> if (n.isEmpty()) "Good evening" else "Good evening, $n"
+        else -> if (n.isEmpty()) "Up late?" else "Up late, $n?"
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun Hero(
+    state: ChatUiState,
+    palette: AbyssPalette,
+    vm: ChatViewModel,
+    onCamera: () -> Unit,
+    onModel: () -> Unit,
+) {
+    val text = remember(state.settings.userName) { greeting(state.settings.userName) }
+    val focus = remember { FocusRequester() }
+    var shown by remember { mutableIntStateOf(0) }
+    LaunchedEffect(text) {
+        for (i in 1..text.length) { shown = i; delay(32) }
+    }
+
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 18.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AbyssMark(palette, size = 36.dp)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text.take(shown),
+                color = palette.onBackground,
+                fontFamily = AbyssFonts.Display,
+                fontSize = 34.sp,
+                lineHeight = 40.sp,
+            )
         }
-        Box {
-            IconButton(onClick = { convMenu = true }) {
-                Icon(Icons.Filled.History, "Conversations", tint = palette.onBackground)
-            }
-            DropdownMenu(expanded = convMenu, onDismissRequest = { convMenu = false }) {
-                if (conversations.isEmpty()) DropdownMenuItem(text = { Text("No saved chats") }, onClick = {})
-                conversations.forEach { id ->
-                    val label = if (id == "default") "Main" else "Chat " + id.takeLast(4)
-                    DropdownMenuItem(
-                        text = { Text(label + if (id == currentConversation) "  •" else "") },
-                        onClick = { onSwitch(id); convMenu = false })
+        Spacer(Modifier.size(30.dp))
+        Composer(state = state, palette = palette, vm = vm, hero = true,
+            onCamera = onCamera, onModel = onModel, focusRequester = focus)
+        Spacer(Modifier.size(16.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            SUGGESTIONS.forEachIndexed { i, s ->
+                Appear(delayMs = 260 + i * 60) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, palette.outline, RoundedCornerShape(12.dp))
+                            .background(palette.surface.copy(alpha = 0.55f))
+                            .clickable {
+                                vm.onInputChange(s.prompt)
+                                runCatching { focus.requestFocus() }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(s.icon, null, tint = palette.onSurface.copy(alpha = 0.75f), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(7.dp))
+                        Text(s.label, color = palette.onSurface.copy(alpha = 0.85f), fontSize = 14.sp)
+                    }
                 }
             }
         }
-        IconButton(onClick = onTogglePalettes) {
-            Icon(Icons.Filled.Palette, "Themes", tint = palette.onBackground)
-        }
-        IconButton(onClick = onOpenSettings) {
-            Icon(Icons.Filled.Settings, "Settings", tint = palette.onBackground)
-        }
+        Spacer(Modifier.size(56.dp))
     }
 }
 
-@Composable
-private fun EmptyState(palette: AbyssPalette, modifier: Modifier) {
-    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("◍", fontSize = 64.sp, color = palette.primary.copy(alpha = 0.8f))
-            Spacer(Modifier.size(12.dp))
-            Text(
-                "Ask anything. Pick an agent, or let Auto route it.",
-                color = palette.onBackground.copy(alpha = 0.7f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 40.dp),
-            )
-        }
-    }
-}
+// ---------------------------------------------------------------- conversation
 
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun MessageBubble(
-    msg: UiMessage,
+private fun Conversation(
+    state: ChatUiState,
     palette: AbyssPalette,
-    onTranslate: () -> Unit,
-    onToggleOriginal: () -> Unit,
-    onDelete: () -> Unit,
-    onRegenerate: () -> Unit,
+    vm: ChatViewModel,
+    onCamera: () -> Unit,
+    onModel: () -> Unit,
 ) {
-    val isUser = msg.role == Role.USER
-    val showingTranslation = msg.showTranslated && msg.translatedText != null
-    val bodyText = if (showingTranslation) msg.translatedText!! else msg.content
-    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-    var menu by remember { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().animateContentSize(),
-        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
-    ) {
-        if (!isUser && msg.agentLabel != null) {
-            Text(msg.agentLabel, color = palette.primary.copy(alpha = 0.75f),
-                fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 6.dp, bottom = 2.dp))
+    val listState = rememberLazyListState()
+    // Ids that already played their entrance — scrolling back must not replay it.
+    val seen = remember { mutableSetOf<Long>() }
+    LaunchedEffect(state.messages.size) {
+        if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex)
+    }
+    LaunchedEffect(state.messages.lastOrNull()?.content?.length) {
+        val last = state.messages.lastIndex
+        val visible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        if (last >= 0 && visible >= last - 1) listState.scrollToItem(last, 100_000)
+    }
+
+    val scope = rememberCoroutineScope()
+    val atBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            last == null || (last.index >= info.totalItemsCount - 1 &&
+                last.offset + last.size <= info.viewportEndOffset + 40)
         }
-        Box(
-            Modifier
-                .widthIn(max = 320.dp)
-                .clip(RoundedCornerShape(
-                    topStart = 16.dp, topEnd = 16.dp,
-                    bottomStart = if (isUser) 16.dp else 4.dp,
-                    bottomEnd = if (isUser) 4.dp else 16.dp))
-                .background(
-                    when {
-                        msg.error -> palette.error.copy(alpha = 0.18f)
-                        isUser -> palette.userBubble
-                        else -> palette.assistantBubble.copy(alpha = 0.92f)
-                    }
-                )
-                .combinedClickable(onClick = {}, onLongClick = { menu = true })
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+    }
+
+    Column(Modifier.fillMaxSize()) {
+      Box(Modifier.weight(1f).fillMaxWidth()) {
+        LazyColumn(
+            state = listState,
+            // Messages dissolve into the top bar / composer instead of hard-cutting.
+            modifier = Modifier.fillMaxSize().edgeFade(top = 28.dp, bottom = 22.dp),
+            contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
-            Text(
-                text = bodyText + if (msg.streaming) " ▍" else "",
-                color = if (msg.error) palette.error else palette.onSurface,
-                fontSize = 15.sp,
-            )
+            items(state.messages, key = { it.id }) { msg ->
+                val firstTime = remember(msg.id) { seen.add(msg.id) }
+                Box(Modifier.animateItem()) {
+                    Appear(enabled = firstTime) {
+                        if (msg.role == Role.USER) UserMessage(msg, palette, onDelete = { vm.deleteMessage(msg.id) })
+                        else AssistantMessage(
+                            msg, palette,
+                            onCopy = {},
+                            onRegenerate = { vm.regenerate() },
+                            onDelete = { vm.deleteMessage(msg.id) },
+                            onTranslate = { vm.translateMessage(msg.id) },
+                            onToggleOriginal = { vm.toggleOriginal(msg.id) },
+                        )
+                    }
+                }
+            }
+        }
+        // Jump-to-latest, only when scrolled away from the bottom.
+        JumpToLatest(
+            visible = !atBottom, palette = palette,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
+        ) {
+            scope.launch {
+                if (state.messages.isNotEmpty()) listState.animateScrollToItem(state.messages.lastIndex, 100_000)
+            }
+        }
+      }
+        state.mediaStatus?.let {
+            Text(it, color = palette.primary, fontSize = 12.sp,
+                modifier = Modifier.padding(start = 24.dp, bottom = 4.dp))
+        }
+        Box(Modifier.padding(horizontal = 12.dp).padding(bottom = 8.dp)) {
+            Composer(state = state, palette = palette, vm = vm, hero = false,
+                onCamera = onCamera, onModel = onModel)
+        }
+    }
+}
+
+/**
+ * Lives at top level on purpose: calling AnimatedVisibility inside a Box that
+ * sits in a Column picks ColumnScope.AnimatedVisibility and fails to compile.
+ */
+@Composable
+private fun JumpToLatest(visible: Boolean, palette: AbyssPalette, modifier: Modifier, onClick: () -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(200)) + androidx.compose.animation.scaleIn(tween(220), initialScale = 0.7f),
+        exit = fadeOut(tween(160)) + androidx.compose.animation.scaleOut(tween(160), targetScale = 0.7f),
+        modifier = modifier,
+    ) {
+        Box(
+            Modifier.size(38.dp).clip(CircleShape)
+                .background(palette.surface)
+                .border(1.dp, palette.outline, CircleShape)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.KeyboardArrowDown, "Latest", tint = palette.onSurface, modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun UserMessage(msg: UiMessage, palette: AbyssPalette, onDelete: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    var menu by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+        Box(
+            Modifier.widthIn(max = 310.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(palette.userBubble)
+                .combinedClickable(onClick = {}, onLongClick = { menu = true })
+                .padding(horizontal = 16.dp, vertical = 11.dp),
+        ) {
+            Text(msg.content, color = palette.onSurface, fontSize = 16.sp, lineHeight = 23.sp)
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(text = { Text("Copy") }, onClick = {
-                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(bodyText)); menu = false })
-                if (!isUser) DropdownMenuItem(text = { Text("Regenerate") },
-                    onClick = { onRegenerate(); menu = false })
+                    clipboard.setText(AnnotatedString(msg.content)); menu = false })
+                DropdownMenuItem(text = { Text("Delete") }, onClick = { onDelete(); menu = false })
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun AssistantMessage(
+    msg: UiMessage,
+    palette: AbyssPalette,
+    onCopy: () -> Unit,
+    onRegenerate: () -> Unit,
+    onDelete: () -> Unit,
+    onTranslate: () -> Unit,
+    onToggleOriginal: () -> Unit,
+) {
+    val clipboard = LocalClipboardManager.current
+    var menu by remember { mutableStateOf(false) }
+    val showingTranslation = msg.showTranslated && msg.translatedText != null
+    val body = if (showingTranslation) msg.translatedText.orEmpty() else msg.content
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) { if (copied) { delay(1400); copied = false } }
+
+    Column(Modifier.fillMaxWidth().animateContentSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Only the live reply animates its mark — dozens of spinning marks
+            // in a long chat would just burn frames on a 120 Hz screen.
+            AbyssMark(palette, size = 20.dp, pulse = msg.streaming, speedMs = 1600, animated = msg.streaming)
+            if (msg.agentLabel != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(msg.agentLabel, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+
+        Box(Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { menu = true })) {
+            when {
+                msg.error -> Text(body, color = palette.error, fontSize = 15.sp)
+                msg.streaming && body.isBlank() -> Thinking(palette)
+                else -> MarkdownText(body, palette)
+            }
+            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text("Copy") }, onClick = {
+                    clipboard.setText(AnnotatedString(body)); menu = false })
+                DropdownMenuItem(text = { Text("Regenerate") }, onClick = { onRegenerate(); menu = false })
                 DropdownMenuItem(text = { Text("Delete") }, onClick = { onDelete(); menu = false })
             }
         }
 
-        // Inline translation affordance (X-style).
-        if (!isUser && !msg.error && !msg.streaming) {
-            when {
-                msg.translating -> TranslateHint("Translating…", palette)
-                showingTranslation -> Row(verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 6.dp, top = 2.dp)) {
-                    Text("Translated from ${langName(msg.sourceLang)} · ",
-                        color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace)
-                    Text("Show original", color = palette.primary, fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.clickable(onClick = onToggleOriginal))
+        if (!msg.streaming && !msg.error) {
+            Spacer(Modifier.size(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SmallAction(
+                    if (copied) Icons.Filled.Check else Icons.Filled.ContentCopy, palette,
+                    tint = if (copied) palette.primary else null,
+                ) { clipboard.setText(AnnotatedString(body)); copied = true; onCopy() }
+                SmallAction(Icons.Filled.Refresh, palette, onClick = onRegenerate)
+                Spacer(Modifier.width(6.dp))
+                when {
+                    msg.translating -> Hint("Translating…", palette)
+                    showingTranslation -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Hint("Translated from ${langName(msg.sourceLang)} · ", palette)
+                        Text("Show original", color = palette.primary, fontSize = 12.sp,
+                            modifier = Modifier.clickable(onClick = onToggleOriginal))
+                    }
+                    msg.translatedText != null -> Text("Show translation", color = palette.primary,
+                        fontSize = 12.sp, modifier = Modifier.clickable(onClick = onToggleOriginal))
+                    msg.offerTranslate -> Text("Translate", color = palette.primary, fontSize = 12.sp,
+                        modifier = Modifier.clickable(onClick = onTranslate))
                 }
-                msg.translatedText != null -> TranslateLink("Show translation", palette) { onToggleOriginal() }
-                msg.offerTranslate -> TranslateLink("Translate", palette, onTranslate)
             }
         }
     }
 }
 
 @Composable
-private fun TranslateLink(text: String, palette: AbyssPalette, onClick: () -> Unit) {
-    Text(text, color = palette.primary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
-        modifier = Modifier.padding(start = 6.dp, top = 2.dp).clickable(onClick = onClick))
+private fun SmallAction(icon: ImageVector, palette: AbyssPalette, tint: Color? = null, onClick: () -> Unit) {
+    Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        androidx.compose.animation.Crossfade(targetState = icon, label = "act") { ic ->
+            Icon(ic, null, tint = tint ?: palette.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+        }
+    }
 }
 
 @Composable
-private fun TranslateHint(text: String, palette: AbyssPalette) {
-    Text(text, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.sp,
-        fontFamily = FontFamily.Monospace, modifier = Modifier.padding(start = 6.dp, top = 2.dp))
+private fun Hint(text: String, palette: AbyssPalette) {
+    Text(text, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
 }
 
 private fun langName(tag: String?): String =
     tag?.let { com.abyss.app.core.translate.Languages.name(it) } ?: "another language"
 
 @Composable
-private fun InputBar(
-    value: String,
-    busy: Boolean,
-    recording: Boolean,
-    transcribing: Boolean,
+private fun Thinking(palette: AbyssPalette) {
+    val tr = rememberInfiniteTransition(label = "think")
+    val a by tr.animateFloat(0.35f, 1f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "a")
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+        Text("Thinking", color = palette.onSurface.copy(alpha = a), fontFamily = AbyssFonts.Reading,
+            fontSize = 16.sp)
+        Spacer(Modifier.width(4.dp))
+        repeat(3) { i ->
+            val d by tr.animateFloat(0f, 1f,
+                infiniteRepeatable(tween(900, delayMillis = i * 150, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                label = "d$i")
+            Box(Modifier.padding(horizontal = 2.dp).size(5.dp)
+                .graphicsLayer { translationY = -6f * d }
+                .clip(CircleShape).background(palette.primary.copy(alpha = 0.5f + 0.5f * d)))
+        }
+    }
+}
+
+// ---------------------------------------------------------------- composer
+
+@Composable
+private fun Composer(
+    state: ChatUiState,
     palette: AbyssPalette,
-    onChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onStop: () -> Unit,
-    onStartRec: () -> Unit,
-    onStopRec: () -> Unit,
-    onCancelRec: () -> Unit,
+    vm: ChatViewModel,
+    hero: Boolean,
     onCamera: () -> Unit,
+    onModel: () -> Unit,
+    focusRequester: FocusRequester? = null,
 ) {
+    var focused by remember { mutableStateOf(false) }
+    // Local field value so programmatic text (suggestions, transcripts) puts the
+    // cursor at the END instead of the start.
+    var field by remember { mutableStateOf(TextFieldValue(state.input, TextRange(state.input.length))) }
+    LaunchedEffect(state.input) {
+        if (state.input != field.text) field = TextFieldValue(state.input, TextRange(state.input.length))
+    }
+    val border by animateColorAsState(
+        if (focused) palette.primary.copy(alpha = 0.45f) else palette.outline, tween(250), label = "border")
+    // A light glint that travels around the border while the field is focused.
+    // Read only in the draw phase, so it never recomposes the composer.
+    val glintT = rememberInfiniteTransition(label = "glint")
+    val glint = glintT.animateFloat(0f, 1f, infiniteRepeatable(tween(2600)), label = "g")
+    val glintAlpha by animateFloatAsState(if (focused) 1f else 0f, tween(300), label = "ga")
+
     Column(
-        Modifier.fillMaxWidth().imePadding().padding(horizontal = 10.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(palette.surface.copy(alpha = if (palette.dark) 0.94f else 1f))
+            .border(1.dp, border, RoundedCornerShape(24.dp))
+            .drawWithContent {
+                drawContent()
+                if (glintAlpha > 0.01f) {
+                    val w = size.width
+                    val x = -w * 0.5f + glint.value * w * 2f
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            0f to Color.Transparent,
+                            0.5f to palette.secondary.copy(alpha = 0.9f * glintAlpha),
+                            1f to Color.Transparent,
+                            start = Offset(x - w * 0.35f, 0f),
+                            end = Offset(x + w * 0.35f, size.height),
+                        ),
+                        cornerRadius = CornerRadius(24.dp.toPx()),
+                        style = Stroke(width = 1.5.dp.toPx()),
+                    )
+                }
+            }
+            .animateContentSize(),
     ) {
-        if (recording) {
-            RecordingBar(palette, onCancel = onCancelRec, onStop = onStopRec)
+        if (state.recording) {
+            RecordingRow(palette, onCancel = vm::cancelRecording, onSend = vm::stopRecordingAndSend)
             return@Column
         }
-        if (transcribing) {
+        if (state.transcribing) {
             Text("Transcribing…", color = palette.primary, fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.padding(start = 10.dp, bottom = 6.dp))
+                modifier = Modifier.padding(start = 18.dp, top = 12.dp))
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onCamera) {
-                Icon(Icons.Filled.PhotoCamera, "Camera", tint = palette.onBackground.copy(alpha = 0.7f))
+        Box(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 6.dp)) {
+            if (state.input.isEmpty()) {
+                Text(
+                    if (hero) "How can I help you today?" else "Reply…",
+                    color = palette.onSurface.copy(alpha = 0.42f), fontSize = 16.sp,
+                )
             }
-            IconButton(onClick = onStartRec) {
-                Icon(Icons.Filled.Mic, "Voice", tint = palette.onBackground.copy(alpha = 0.7f))
-            }
-            TextField(
-                value = value,
-                onValueChange = onChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Message Abyss…", color = palette.onSurface.copy(alpha = 0.4f)) },
-                shape = RoundedCornerShape(24.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = palette.surface.copy(alpha = 0.85f),
-                    unfocusedContainerColor = palette.surface.copy(alpha = 0.85f),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor = palette.primary,
-                    focusedTextColor = palette.onSurface,
-                    unfocusedTextColor = palette.onSurface,
-                ),
-                maxLines = 6,
+            BasicTextField(
+                value = field,
+                onValueChange = { field = it; vm.onInputChange(it.text) },
+                textStyle = TextStyle(color = palette.onSurface, fontSize = 16.sp, lineHeight = 23.sp),
+                cursorBrush = SolidColor(palette.primary),
+                maxLines = 8,
+                modifier = Modifier.fillMaxWidth().heightIn(min = if (hero) 48.dp else 24.dp)
+                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                    .onFocusChanged { focused = it.isFocused },
             )
-            Spacer(Modifier.size(8.dp))
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ComposerIcon(Icons.Filled.Add, palette, onCamera)
+            ComposerIcon(Icons.Filled.Mic, palette, vm::startRecording)
+            Spacer(Modifier.weight(1f))
+            Text(
+                prettyModel(state.settings.model),
+                color = palette.onSurface.copy(alpha = 0.6f), fontSize = 13.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 150.dp).clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onModel).padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            val canSend = state.input.isNotBlank() || state.isBusy
+            val sendBg by animateColorAsState(
+                if (canSend) palette.primary else palette.primary.copy(alpha = 0.35f), tween(200), label = "send")
+            val haptic = LocalHapticFeedback.current
+            val press = remember { MutableInteractionSource() }
+            val pressed by press.collectIsPressedAsState()
+            val sendScale by animateFloatAsState(
+                if (pressed) 0.86f else 1f, spring(dampingRatio = 0.45f, stiffness = 600f), label = "ss")
             Box(
-                Modifier.size(48.dp).clip(RoundedCornerShape(50)).background(palette.primary)
-                    .clickable { if (busy) onStop() else onSend() },
+                Modifier.size(36.dp).graphicsLayer { scaleX = sendScale; scaleY = sendScale }
+                    .clip(RoundedCornerShape(10.dp)).background(sendBg)
+                    .clickable(interactionSource = press, indication = null, enabled = canSend) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        if (state.isBusy) vm.stop() else vm.send()
+                    },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(if (busy) Icons.Filled.Stop else Icons.Filled.Send,
-                    contentDescription = if (busy) "Stop" else "Send", tint = palette.onPrimary)
+                Icon(if (state.isBusy) Icons.Filled.Stop else Icons.Filled.ArrowUpward,
+                    if (state.isBusy) "Stop" else "Send", tint = palette.onPrimary, modifier = Modifier.size(20.dp))
             }
         }
     }
 }
 
+private fun prettyModel(m: String): String =
+    m.substringAfterLast('/').replace('-', ' ').split(' ')
+        .joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+
 @Composable
-private fun RecordingBar(palette: AbyssPalette, onCancel: () -> Unit, onStop: () -> Unit) {
-    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "rec")
-    val a by transition.animateFloat(
-        0.3f, 1f,
-        androidx.compose.animation.core.infiniteRepeatable(
-            androidx.compose.animation.core.tween(600),
-            androidx.compose.animation.core.RepeatMode.Reverse), label = "a")
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-            .background(palette.surface.copy(alpha = 0.9f)).padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(12.dp).clip(RoundedCornerShape(50))
-            .background(palette.error.copy(alpha = a)))
-        Spacer(Modifier.size(10.dp))
-        Text("Recording…", color = palette.onSurface, modifier = Modifier.weight(1f),
-            fontFamily = FontFamily.Monospace)
-        Text("Cancel", color = palette.onSurface.copy(alpha = 0.7f),
-            modifier = Modifier.clickable(onClick = onCancel).padding(8.dp))
-        Spacer(Modifier.size(6.dp))
-        Box(Modifier.clip(RoundedCornerShape(50)).background(palette.primary)
-            .clickable(onClick = onStop).padding(horizontal = 18.dp, vertical = 10.dp)) {
-            Icon(Icons.Filled.Send, "Send", tint = palette.onPrimary, modifier = Modifier.size(20.dp))
+private fun ComposerIcon(icon: ImageVector, palette: AbyssPalette, onClick: () -> Unit) {
+    Box(
+        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
+            .border(1.dp, palette.outline, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Icon(icon, null, tint = palette.onSurface.copy(alpha = 0.75f), modifier = Modifier.size(18.dp)) }
+    Spacer(Modifier.width(6.dp))
+}
+
+@Composable
+private fun RecordingRow(palette: AbyssPalette, onCancel: () -> Unit, onSend: () -> Unit) {
+    val tr = rememberInfiniteTransition(label = "rec")
+    Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        // Live "waveform" bars.
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(palette.error))
+            Spacer(Modifier.width(10.dp))
+            repeat(18) { i ->
+                val h by tr.animateFloat(0.2f, 1f,
+                    infiniteRepeatable(tween(420 + (i * 53) % 300), RepeatMode.Reverse), label = "b$i")
+                Box(Modifier.padding(horizontal = 1.5.dp).width(3.dp)
+                    .height((5f + 17f * h).dp).clip(RoundedCornerShape(2.dp))
+                    .background(palette.primary.copy(alpha = 0.8f)))
+            }
+        }
+        Text("Cancel", color = palette.onSurface.copy(alpha = 0.7f), fontSize = 14.sp,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onCancel).padding(8.dp))
+        Spacer(Modifier.width(6.dp))
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(palette.primary)
+            .clickable(onClick = onSend), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.ArrowUpward, "Send", tint = palette.onPrimary, modifier = Modifier.size(20.dp))
         }
     }
 }
+
+// ---------------------------------------------------------------- drawer
+
+@Composable
+private fun ConversationDrawer(
+    palette: AbyssPalette,
+    conversations: List<com.abyss.app.core.data.ConversationSummary>,
+    current: String,
+    onNew: () -> Unit,
+    onPick: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onThemes: () -> Unit,
+    onSettings: () -> Unit,
+) {
+    ModalDrawerSheet(drawerContainerColor = palette.background, drawerContentColor = palette.onBackground) {
+        Column(Modifier.fillMaxHeight().statusBarsPadding().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 6.dp)) {
+                AbyssMark(palette, size = 26.dp)
+                Spacer(Modifier.width(10.dp))
+                Text("Abyss", color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 24.sp)
+            }
+            Spacer(Modifier.size(18.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onNew)
+                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(26.dp).clip(CircleShape).background(palette.primary), Alignment.Center) {
+                    Icon(Icons.Filled.Add, null, tint = palette.onPrimary, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.width(12.dp))
+                Text("New chat", color = palette.primary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            }
+            Spacer(Modifier.size(14.dp))
+            Text("Recents", color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp,
+                modifier = Modifier.padding(start = 10.dp, bottom = 6.dp))
+            if (conversations.isEmpty()) {
+                Text("Your chats will appear here.", color = palette.onSurface.copy(alpha = 0.4f), fontSize = 13.sp,
+                    modifier = Modifier.padding(start = 10.dp, top = 6.dp))
+            }
+            LazyColumn(Modifier.weight(1f)) {
+                items(conversations, key = { it.conversationId }) { c ->
+                    DrawerChatRow(c, selected = c.conversationId == current, palette = palette,
+                        onPick = { onPick(c.conversationId) }, onDelete = { onDelete(c.conversationId) })
+                }
+            }
+            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(1.dp).background(palette.outline))
+            DrawerItem(Icons.Filled.Palette, "Themes", palette, onThemes)
+            DrawerItem(Icons.Filled.Settings, "Settings", palette, onSettings)
+        }
+    }
+}
+
+@Composable
+private fun DrawerItem(icon: ImageVector, label: String, palette: AbyssPalette, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = palette.onSurface, fontSize = 14.sp)
+    }
+}
+
+private fun conversationLabel(c: com.abyss.app.core.data.ConversationSummary): String {
+    val t = c.title?.trim()?.replace('\n', ' ')
+    if (!t.isNullOrEmpty()) return t
+    val ms = c.conversationId.removePrefix("conv_").toLongOrNull() ?: c.lastAt
+    return "Chat · " + SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(ms))
+}
+
+private fun relativeTime(ms: Long): String {
+    val diff = System.currentTimeMillis() - ms
+    val min = diff / 60_000
+    return when {
+        min < 1 -> "now"
+        min < 60 -> "${min}m"
+        min < 60 * 24 -> "${min / 60}h"
+        min < 60 * 24 * 7 -> "${min / (60 * 24)}d"
+        else -> SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(ms))
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DrawerChatRow(
+    c: com.abyss.app.core.data.ConversationSummary, selected: Boolean, palette: AbyssPalette,
+    onPick: () -> Unit, onDelete: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                .background(if (selected) palette.surfaceVariant else Color.Transparent)
+                .combinedClickable(onClick = onPick, onLongClick = { menu = true })
+                .padding(horizontal = 10.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.ChatBubbleOutline, null,
+                tint = if (selected) palette.primary else palette.onSurface.copy(alpha = 0.45f),
+                modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(conversationLabel(c), color = palette.onSurface, fontSize = 14.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            Text(relativeTime(c.lastAt), color = palette.onSurface.copy(alpha = 0.38f), fontSize = 11.sp)
+        }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text("Delete chat", color = palette.error) },
+                onClick = { menu = false; onDelete() })
+        }
+    }
+}
+
+/**
+ * Fades the content to transparent over [top] at the top edge and [bottom] at
+ * the bottom edge, so scrolling text dissolves rather than being hard-clipped.
+ */
+private fun Modifier.edgeFade(top: Dp, bottom: Dp): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val t = top.toPx()
+        val b = bottom.toPx()
+        drawRect(
+            brush = Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = t),
+            size = Size(size.width, t),
+            blendMode = BlendMode.DstIn,
+        )
+        drawRect(
+            brush = Brush.verticalGradient(0f to Color.Black, 1f to Color.Transparent,
+                startY = size.height - b, endY = size.height),
+            topLeft = Offset(0f, size.height - b),
+            size = Size(size.width, b),
+            blendMode = BlendMode.DstIn,
+        )
+    }

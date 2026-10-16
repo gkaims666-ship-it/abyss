@@ -1,11 +1,13 @@
 package com.abyss.app.ui.feature.alarm
 
+import com.abyss.app.ui.components.blockTaps
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,11 +64,10 @@ fun AlarmsScreen(palette: AbyssPalette) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var editing by remember { mutableStateOf<AlarmEntity?>(null) }
+    androidx.activity.compose.BackHandler(enabled = editing != null) { editing = null }
 
-    Box(Modifier.fillMaxSize().background(palette.background)) {
+    Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Text("Alarms", color = palette.onBackground, fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace, fontSize = 20.sp)
             Spacer(Modifier.size(12.dp))
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(alarms, key = { it.id }) { alarm ->
@@ -118,8 +119,10 @@ fun AlarmsScreen(palette: AbyssPalette) {
 @Composable
 private fun AlarmRow(alarm: AlarmEntity, palette: AbyssPalette, onToggle: () -> Unit, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
-            .background(palette.surface).clickable(onClick = onClick).padding(16.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(palette.surface.copy(alpha = if (palette.dark) 0.86f else 0.96f))
+            .border(1.dp, if (alarm.enabled) palette.primary.copy(alpha = 0.45f) else palette.outline, RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -156,7 +159,7 @@ private fun AlarmEditor(
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
-                .background(palette.surface).padding(18.dp).clickable(enabled = false) {},
+                .background(palette.surface).padding(18.dp).blockTaps(),
         ) {
             // Time steppers
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center,

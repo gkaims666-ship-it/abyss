@@ -45,7 +45,7 @@ data class ChatUiState(
     val transcribing: Boolean = false,
     val mediaStatus: String? = null,     // transient status line for media work
     val conversationId: String = "default",
-    val conversations: List<String> = emptyList(),
+    val conversations: List<com.abyss.app.core.data.ConversationSummary> = emptyList(),
 )
 
 
@@ -69,7 +69,7 @@ class ChatViewModel : ViewModel() {
             settingsStore.settings.collect { s -> _state.update { it.copy(settings = s) } }
         }
         viewModelScope.launch {
-            chatDao.observeConversations().collect { list ->
+            chatDao.observeConversationSummaries().collect { list ->
                 _state.update { it.copy(conversations = list) }
             }
         }
@@ -97,9 +97,21 @@ class ChatViewModel : ViewModel() {
         viewModelScope.launch { loadConversationMessages(id) }
     }
 
-    fun deleteMessage(id: Long) {
-        _state.update { st -> st.copy(messages = st.messages.filterNot { it.id == id }) }
+    /** Delete a whole conversation; if it's the open one, start a fresh chat. */
+    fun deleteConversation(id: String) {
+        viewModelScope.launch {
+            chatDao.deleteConversation(id)
+            if (id == convId) newConversation()
+        }
     }
+
+    fun deleteMessage(id: Long) {
+        val msg = _state.value.messages.firstOrNull { it.id == id } ?: return
+        _state.update { st -> st.copy(messages = st.messages.filterNot { it.id == id }) }
+        val role = if (msg.role == Role.USER) "user" else "assistant"
+        viewModelScope.launch { chatDao.deleteMatching(convId, role, msg.content) }
+    }
+
 
     /** Re-run the last user turn to get a fresh assistant reply. */
     fun regenerate() {
@@ -108,8 +120,14 @@ class ChatViewModel : ViewModel() {
         val lastUser = msgs.lastOrNull { it.role == Role.USER } ?: return
         // Drop any assistant messages after the last user message.
         val idx = msgs.indexOf(lastUser)
+        val dropped = msgs.drop(idx + 1).filter { it.role == Role.ASSISTANT && !it.error }
         _state.update { it.copy(messages = it.messages.subList(0, idx + 1).toList(), isBusy = true) }
-        streamJob = viewModelScope.launch { runTurn(lastUser.content, _state.value.settings) }
+        val conv = convId
+        streamJob = viewModelScope.launch {
+            // Remove the replaced reply from storage too, or it reappears on restart.
+            dropped.forEach { chatDao.deleteMatching(conv, "assistant", it.content) }
+            runTurn(lastUser.content, _state.value.settings)
+        }
     }
 
     fun onInputChange(text: String) = _state.update { it.copy(input = text) }

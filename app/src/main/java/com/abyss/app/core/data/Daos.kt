@@ -25,7 +25,44 @@ interface ChatDao {
 
     @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
     suspend fun deleteConversation(conversationId: String)
+
+    /**
+     * Deletes the newest stored row matching this message. Freshly sent
+     * messages carry temporary UI ids, so we match on content instead of id.
+     */
+    @Query(
+        """
+        DELETE FROM chat_messages WHERE id = (
+            SELECT id FROM chat_messages
+            WHERE conversationId = :conversationId AND role = :role AND content = :content
+            ORDER BY id DESC LIMIT 1
+        )
+        """
+    )
+    suspend fun deleteMatching(conversationId: String, role: String, content: String)
+
+    /** One row per conversation: its first user message as a title, newest first. */
+    @Query(
+        """
+        SELECT m.conversationId AS conversationId,
+               (SELECT u.content FROM chat_messages AS u
+                 WHERE u.conversationId = m.conversationId AND u.role = 'user'
+                 ORDER BY u.id ASC LIMIT 1) AS title,
+               MAX(m.createdAt) AS lastAt
+        FROM chat_messages AS m
+        GROUP BY m.conversationId
+        ORDER BY lastAt DESC
+        """
+    )
+    fun observeConversationSummaries(): Flow<List<ConversationSummary>>
 }
+
+/** Row type for [ChatDao.observeConversationSummaries]. */
+data class ConversationSummary(
+    val conversationId: String,
+    val title: String?,
+    val lastAt: Long,
+)
 
 @Dao
 interface MemoryDao {

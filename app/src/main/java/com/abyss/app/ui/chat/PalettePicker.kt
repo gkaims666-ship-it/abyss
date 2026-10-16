@@ -1,5 +1,6 @@
 package com.abyss.app.ui.chat
 
+import com.abyss.app.ui.components.blockTaps
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,10 +55,13 @@ fun PalettePicker(
                 .navigationBarsPadding()
                 .padding(20.dp)
                 // Consume clicks so tapping the sheet doesn't dismiss.
-                .clickable(enabled = false) {},
+                .blockTaps(),
         ) {
-            Text("Themes", color = sheet.onSurface, fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace, fontSize = 16.sp)
+            Box(Modifier.align(Alignment.CenterHorizontally).size(width = 36.dp, height = 4.dp)
+                .clip(CircleShape).background(sheet.outline))
+            Spacer(Modifier.size(14.dp))
+            Text("Themes", color = sheet.onSurface, fontFamily = com.abyss.app.ui.theme.AbyssFonts.Display,
+                fontSize = 24.sp)
             Spacer(Modifier.size(14.dp))
             LazyVerticalGrid(columns = GridCells.Fixed(2),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -72,25 +76,29 @@ fun PalettePicker(
 
 @Composable
 private fun PaletteCard(p: AbyssPalette, selected: Boolean, onClick: () -> Unit) {
-    Row(
+    Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(p.background)
             .border(
                 width = if (selected) 2.dp else 1.dp,
                 color = if (selected) p.primary else p.outline,
-                shape = RoundedCornerShape(14.dp))
+                shape = RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Swatch(p.primary); Spacer(Modifier.size(6.dp))
-        Swatch(p.secondary); Spacer(Modifier.size(6.dp))
-        Swatch(p.symbol); Spacer(Modifier.size(10.dp))
-        Text(p.displayName, color = p.onBackground, fontSize = 13.sp,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        // Mini preview: a reply line, a user bubble and the accent.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Aa", color = p.onBackground, fontFamily = com.abyss.app.ui.theme.AbyssFonts.Display, fontSize = 20.sp)
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.size(width = 34.dp, height = 14.dp).clip(RoundedCornerShape(7.dp)).background(p.userBubble))
+            Spacer(Modifier.size(6.dp))
+            Swatch(p.primary)
+        }
+        Spacer(Modifier.size(10.dp))
+        Text(p.displayName, color = p.onBackground.copy(alpha = 0.85f), fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 
