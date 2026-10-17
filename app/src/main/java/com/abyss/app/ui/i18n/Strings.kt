@@ -483,6 +483,17 @@ abstract class Strings {
 
     abstract val radarCoordFormats: String
 
+    // ---- radar: sun & shadow (chronolocation)
+    abstract val radarSun: String
+    abstract val radarSunNow: String
+    abstract val radarShadow: String
+    abstract val radarSunBelow: String
+    abstract val radarSunrise: String
+    abstract val radarSunset: String
+    abstract val radarSolarNoon: String
+    abstract val radarPolarDay: String
+    abstract val radarPolarNight: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

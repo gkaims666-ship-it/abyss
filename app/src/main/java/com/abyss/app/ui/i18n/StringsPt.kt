@@ -472,4 +472,15 @@ object StringsPt : Strings() {
     override fun radarInViewCount(n: Int) = "À vista · $n"
     override val radarMagAny = "Qualquer M"
     override val radarCoordFormats = "Formatos de coordenadas"
+
+    // ---- radar: sun & shadow (chronolocation)
+    override val radarSun = "Sol e sombra"
+    override val radarSunNow = "Sol agora"
+    override val radarShadow = "Sombra"
+    override val radarSunBelow = "Abaixo do horizonte"
+    override val radarSunrise = "Nascer do sol"
+    override val radarSunset = "Pôr do sol"
+    override val radarSolarNoon = "Meio-dia solar"
+    override val radarPolarDay = "Dia polar"
+    override val radarPolarNight = "Noite polar"
 }

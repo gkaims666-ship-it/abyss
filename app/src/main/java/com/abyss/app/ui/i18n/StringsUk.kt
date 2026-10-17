@@ -472,4 +472,15 @@ object StringsUk : Strings() {
     override fun radarInViewCount(n: Int) = "У зоні видимості · $n"
     override val radarMagAny = "Будь-яка M"
     override val radarCoordFormats = "Формати координат"
+
+    // ---- radar: sun & shadow (chronolocation)
+    override val radarSun = "Сонце й тінь"
+    override val radarSunNow = "Сонце зараз"
+    override val radarShadow = "Тінь"
+    override val radarSunBelow = "За горизонтом"
+    override val radarSunrise = "Схід"
+    override val radarSunset = "Захід"
+    override val radarSolarNoon = "Сонячний полудень"
+    override val radarPolarDay = "Полярний день"
+    override val radarPolarNight = "Полярна ніч"
 }

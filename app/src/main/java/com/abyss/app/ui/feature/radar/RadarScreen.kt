@@ -79,6 +79,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.History
@@ -164,6 +165,7 @@ import com.abyss.app.feature.radar.GeoApi
 import com.abyss.app.feature.radar.MapEvent
 import com.abyss.app.feature.radar.EventFilter
 import com.abyss.app.feature.radar.GeoFormats
+import com.abyss.app.feature.radar.SunMath
 import com.abyss.app.feature.radar.PlanePhoto
 import com.abyss.app.feature.radar.SunCalc
 import com.abyss.app.feature.radar.parseLatLon
@@ -2072,10 +2074,49 @@ private fun PinCard(
                 CoordRow("MGRS", GeoFormats.mgrs(pt[0], pt[1]), palette, onCopyText)
             }
         }
+        var showSun by remember { androidx.compose.runtime.mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { showSun = !showSun }
+            .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.WbSunny, null, tint = palette.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(S.radarSun, color = palette.onSurface.copy(alpha = 0.8f), fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Icon(if (showSun) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null,
+                tint = palette.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
+        }
+        AnimatedVisibility(showSun) { SunBlock(pt, palette, S) }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PinAction(S.copy, palette, Modifier.weight(1f), onCopy)
             PinAction(S.radarShare, palette, Modifier.weight(1f), onShare)
+        }
+    }
+}
+
+@Composable
+private fun SunBlock(pt: DoubleArray, palette: AbyssPalette, S: Strings) {
+    val now = remember { System.currentTimeMillis() }
+    val pos = remember(pt[0], pt[1]) { SunMath.position(pt[0], pt[1], now) }
+    val times = remember(pt[0], pt[1]) { SunMath.times(pt[0], pt[1], now) }
+    val tf = remember(S.code) { java.text.SimpleDateFormat("HH:mm", S.locale) }
+    Column {
+        if (pos.elevation > 0) {
+            CoordRow(S.radarSunNow, "%.1f° / %s %.0f°".format(S.locale, pos.elevation, SunMath.compass(pos.azimuth), pos.azimuth),
+                palette) {}
+            pos.shadowBearing?.let { sb ->
+                val len = pos.shadowFactor?.let { " · ×%.1f".format(S.locale, it) } ?: ""
+                CoordRow(S.radarShadow, "%s %.0f°%s".format(S.locale, SunMath.compass(sb), sb, len), palette) {}
+            }
+        } else {
+            CoordRow(S.radarSunNow, S.radarSunBelow, palette) {}
+        }
+        when {
+            times.polarDay -> CoordRow("", S.radarPolarDay, palette) {}
+            times.polarNight -> CoordRow("", S.radarPolarNight, palette) {}
+            else -> {
+                times.sunrise?.let { CoordRow(S.radarSunrise, tf.format(java.util.Date(it)), palette) {} }
+                CoordRow(S.radarSolarNoon, tf.format(java.util.Date(times.solarNoon)), palette) {}
+                times.sunset?.let { CoordRow(S.radarSunset, tf.format(java.util.Date(it)), palette) {} }
+            }
         }
     }
 }

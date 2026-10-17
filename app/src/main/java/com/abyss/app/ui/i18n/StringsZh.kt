@@ -472,4 +472,15 @@ object StringsZh : Strings() {
     override fun radarInViewCount(n: Int) = "视野内 · $n"
     override val radarMagAny = "任意震级"
     override val radarCoordFormats = "坐标格式"
+
+    // ---- radar: sun & shadow (chronolocation)
+    override val radarSun = "太阳与阴影"
+    override val radarSunNow = "此刻太阳"
+    override val radarShadow = "阴影"
+    override val radarSunBelow = "在地平线下"
+    override val radarSunrise = "日出"
+    override val radarSunset = "日落"
+    override val radarSolarNoon = "太阳正午"
+    override val radarPolarDay = "极昼"
+    override val radarPolarNight = "极夜"
 }

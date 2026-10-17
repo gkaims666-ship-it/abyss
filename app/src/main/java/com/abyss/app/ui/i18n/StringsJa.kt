@@ -472,4 +472,15 @@ object StringsJa : Strings() {
     override fun radarInViewCount(n: Int) = "表示中 · $n"
     override val radarMagAny = "全震度"
     override val radarCoordFormats = "座標フォーマット"
+
+    // ---- radar: sun & shadow (chronolocation)
+    override val radarSun = "太陽と影"
+    override val radarSunNow = "現在の太陽"
+    override val radarShadow = "影"
+    override val radarSunBelow = "地平線の下"
+    override val radarSunrise = "日の出"
+    override val radarSunset = "日の入り"
+    override val radarSolarNoon = "南中"
+    override val radarPolarDay = "白夜"
+    override val radarPolarNight = "極夜"
 }
