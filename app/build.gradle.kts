@@ -27,11 +27,13 @@ android {
         versionCode = buildSerial + 1
         versionName = "1." + buildSerial.toString().padStart(6, '0')
         vectorDrawables { useSupportLibrary = true }
+        // Ship only the 64-bit ARM libraries (Nothing Phone 3a and every modern phone):
+        // the other three ABIs roughly doubled the APK for nothing.
+        ndk { abiFilters += "arm64-v8a" }
 
         // Native local-model build is opt-in so the default APK always builds.
         // Enable with: ./gradlew assembleDebug -PwithLocalLlm
         if (project.hasProperty("withLocalLlm")) {
-            ndk { abiFilters += "arm64-v8a" }
             externalNativeBuild {
                 cmake { arguments += listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=Release") }
             }

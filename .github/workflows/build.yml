@@ -67,3 +67,24 @@ jobs:
             --title "Abyss · сборка ${{ github.run_number }}" \
             --notes-file notes.md \
             --latest
+
+      # Also push the APK (split into <100 MB parts, GitHub's per-file limit) to the
+      # `apk` branch. Plain git is reachable where release/artifact downloads aren't.
+      - name: Publish APK to the apk branch
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir drop
+          cp Abyss.apk drop/
+          cd drop
+          sha256sum Abyss.apk | cut -d' ' -f1 > Abyss.apk.sha256
+          split -b 45m -d Abyss.apk Abyss.apk.part-
+          rm Abyss.apk
+          echo "Build ${{ github.run_number }} · ${GITHUB_SHA::7}" > BUILD.txt
+          git init -q
+          git checkout -q -b apk
+          git add .
+          git -c user.name="abyss-ci" -c user.email="ci@abyss.local" commit -q -m "APK build ${{ github.run_number }} (${GITHUB_SHA::7})"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" apk
