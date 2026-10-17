@@ -433,7 +433,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         mv.maxZoomLevel = layer.maxZoom.toDouble()
     }
 
-    fun setLayer(l: BaseLayer) {
+    fun switchLayer(l: BaseLayer) {
         if (layer == l) return
         layer = l
         applyLayer()
@@ -849,11 +849,11 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) 
         Text(S.radarLayers, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
         Spacer(Modifier.height(10.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LayerChip(S.radarLayerAbyss, ctl.layer == BaseLayer.Abyss, palette) { ctl.setLayer(BaseLayer.Abyss) }
-            LayerChip(S.radarLayerStreets, ctl.layer == BaseLayer.Streets, palette) { ctl.setLayer(BaseLayer.Streets) }
-            LayerChip(S.radarLayerSatellite, ctl.layer == BaseLayer.Satellite, palette) { ctl.setLayer(BaseLayer.Satellite) }
-            LayerChip(S.radarLayerTerrain, ctl.layer == BaseLayer.Terrain, palette) { ctl.setLayer(BaseLayer.Terrain) }
-            LayerChip(S.radarLayerTransport, ctl.layer == BaseLayer.Transport, palette) { ctl.setLayer(BaseLayer.Transport) }
+            LayerChip(S.radarLayerAbyss, ctl.layer == BaseLayer.Abyss, palette) { ctl.switchLayer(BaseLayer.Abyss) }
+            LayerChip(S.radarLayerStreets, ctl.layer == BaseLayer.Streets, palette) { ctl.switchLayer(BaseLayer.Streets) }
+            LayerChip(S.radarLayerSatellite, ctl.layer == BaseLayer.Satellite, palette) { ctl.switchLayer(BaseLayer.Satellite) }
+            LayerChip(S.radarLayerTerrain, ctl.layer == BaseLayer.Terrain, palette) { ctl.switchLayer(BaseLayer.Terrain) }
+            LayerChip(S.radarLayerTransport, ctl.layer == BaseLayer.Transport, palette) { ctl.switchLayer(BaseLayer.Transport) }
         }
         Spacer(Modifier.height(18.dp))
         Text(S.radarOverlays, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
