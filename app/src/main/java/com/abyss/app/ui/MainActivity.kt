@@ -5,6 +5,7 @@ import com.abyss.app.ui.components.fadeLayer
 import com.abyss.app.ui.background.abyssObstacle
 
 import android.app.Activity
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -14,7 +15,6 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.layout.offset
@@ -25,7 +25,6 @@ import kotlin.math.sin
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.key
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -116,7 +115,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        requestHighRefresh()
         setContent { AbyssRoot() }
+    }
+
+    /** Ask the compositor for the panel's fastest mode (120 Hz on the 3a) and
+     *  record it so the perf monitor knows the real frame budget. */
+    private fun requestHighRefresh() {
+        val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else windowManager.defaultDisplay
+        val modes = display?.supportedModes ?: return
+        val best = modes.maxByOrNull { it.refreshRate } ?: return
+        com.abyss.app.core.debug.PerfMonitor.refreshHz = best.refreshRate
+        window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
     }
 }
 
@@ -216,25 +226,16 @@ private fun AbyssRoot() {
             // One living background + waves for the whole app, every tab. In
             // power-saving mode it is not composed at all (no sim, no glyphs),
             // except while the collapse/expand animation is playing.
-            if (!bg.powerSave || bg.holeActive) {
-                Box(Modifier.fillMaxSize().graphicsLayer {
-                    if (bg.holeActive) {
-                        val p = bg.holePhase
-                        val k = if (bg.holeExpand) ((p - 0.5f) / 0.5f).coerceIn(0f, 1f)
-                                else (1f - (p / 0.5f).coerceIn(0f, 1f))
-                        alpha = k
-                        val sc = 0.14f + 0.86f * k
-                        scaleX = sc; scaleY = sc
-                        rotationZ = (1f - k) * (if (bg.holeExpand) 26f else -26f)
-                        val c = bg.holeCenter
-                        if (c != Offset.Unspecified && size.width > 0f && size.height > 0f) {
-                            transformOrigin = TransformOrigin(
-                                (c.x / size.width).coerceIn(0f, 1f), (c.y / size.height).coerceIn(0f, 1f))
-                        }
-                    }
-                }) {
-                    AbyssAnimatedBackground(palette = palette, state = bg, dim = dim)
-                }
+            // The water engine is the most expensive thing in the app and cold
+            // start is the worst moment to run it, so it is not composed under
+            // the intro — the intro plays on a flat background at a clean frame
+            // rate, then the engine warms up as the intro dissolves, replaying
+            // the wave the collapse queued at the centre.
+            if ((!bg.powerSave || bg.holeActive) && !showIntro) {
+                // No whole-layer scaling: the waves and glyphs spiral into the
+                // hole themselves (shader `suck` + per-glyph swirl), so the layer
+                // stays put and the collapse reads as the objects being drawn in.
+                AbyssAnimatedBackground(palette = palette, state = bg, dim = dim)
             }
 
             Scaffold(
@@ -271,24 +272,8 @@ private fun AbyssRoot() {
 
             // Rings/crests above content (touch-transparent). Gated and sucked
             // in with the same transform as the background during the animation.
-            if (!bg.powerSave || bg.holeActive) {
-                Box(Modifier.fillMaxSize().graphicsLayer {
-                    if (bg.holeActive) {
-                        val p = bg.holePhase
-                        val k = if (bg.holeExpand) ((p - 0.5f) / 0.5f).coerceIn(0f, 1f)
-                                else (1f - (p / 0.5f).coerceIn(0f, 1f))
-                        alpha = k
-                        val sc = 0.14f + 0.86f * k
-                        scaleX = sc; scaleY = sc
-                        val c = bg.holeCenter
-                        if (c != Offset.Unspecified && size.width > 0f && size.height > 0f) {
-                            transformOrigin = TransformOrigin(
-                                (c.x / size.width).coerceIn(0f, 1f), (c.y / size.height).coerceIn(0f, 1f))
-                        }
-                    }
-                }) {
-                    AbyssWaveOverlay(palette = palette, state = bg)
-                }
+            if ((!bg.powerSave || bg.holeActive) && !showIntro) {
+                AbyssWaveOverlay(palette = palette, state = bg)
             }
 
             // The black hole itself: swells over everything while the field is
@@ -340,26 +325,28 @@ private fun BlackHoleOverlay(state: AbyssBackgroundState, palette: AbyssPalette)
 }
 
 /**
- * One kept-alive tab. The switch animation touches only this layer's
- * translation and alpha, read inside graphicsLayer — so it runs on the render
- * thread every frame without recomposing, re-measuring or re-recording the
- * screen. Hidden tabs are skipped when drawing, swallow touches, and tell
- * their content (back handlers, water obstacles) that they are inactive.
+ * One kept-alive tab, laid out as a full-width horizontal pager page. The
+ * switch moves only this layer's translationX, read inside graphicsLayer — so
+ * it runs on the render thread every frame without recomposing, re-measuring or
+ * re-recording the screen. Each page is a full screen wide and clipped to its
+ * own bounds, so pages sit strictly side by side: no alpha crossfade, so no
+ * translucent ghost copies bleeding to one side. Off-screen pages are skipped
+ * when drawing, swallow touches, and tell their content (back handlers, water
+ * obstacles) that they are inactive.
  */
 @Composable
 private fun TabPage(t: Tab, current: Tab, pos: Animatable<Float, *>, content: @Composable () -> Unit) {
     val active = t == current
     val idx = t.ordinal.toFloat()
-    val onScreen by remember { derivedStateOf { abs(pos.value - idx) < 0.995f } }
+    val onScreen by remember { derivedStateOf { abs(pos.value - idx) < 1.02f } }
     Box(
         Modifier
             .fillMaxSize()
             .zIndex(if (active) 1f else 0f)
             .graphicsLayer {
-                val d = pos.value - idx
-                alpha = (1f - abs(d) * 1.4f).coerceIn(0f, 1f)
-                translationX = -d * size.width * 0.18f
-                compositingStrategy = CompositingStrategy.ModulateAlpha
+                // Full-width slide: page `idx` sits at (idx - pos) screens from centre.
+                translationX = (idx - pos.value) * size.width
+                clip = true
             }
             .drawWithContent { if (onScreen) drawContent() }
             .then(if (active) Modifier else Modifier.pointerInput(Unit) {

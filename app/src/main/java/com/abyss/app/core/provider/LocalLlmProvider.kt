@@ -15,6 +15,7 @@ class LocalLlmProvider : LlmProvider {
     override val id = "local"
     override val displayName = "Local (on-device)"
     override val models = listOf("local-gguf")
+    override val keyless = true
 
     override fun stream(request: LlmRequest, apiKey: String): Flow<LlmChunk> = flow {
         if (!LlamaBridge.available)

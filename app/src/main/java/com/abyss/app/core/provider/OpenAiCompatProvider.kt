@@ -24,6 +24,8 @@ class OpenAiCompatProvider(
     override val displayName: String,
     private val baseUrl: String,
     override val models: List<String>,
+    override val freeModels: List<String> = emptyList(),
+    override val signupUrl: String? = null,
     private val extraHeaders: Map<String, String> = emptyMap(),
 ) : LlmProvider {
 

@@ -27,6 +27,8 @@ class AnthropicProvider(
 ) : LlmProvider {
     override val id = "anthropic"
     override val displayName = "Anthropic"
+    // Anthropic's API has no free tier — keyed access only.
+    override val signupUrl = "https://console.anthropic.com/settings/keys"
 
     private val jsonMedia = "application/json".toMediaType()
 

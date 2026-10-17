@@ -21,12 +21,15 @@ class GeminiProvider(
     override val models: List<String> = listOf(
         "gemini-2.5-pro",
         "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
-        "gemini-1.5-pro",
     ),
 ) : LlmProvider {
     override val id = "gemini"
     override val displayName = "Gemini"
+    // Google AI Studio serves these on a genuinely free tier with a free key.
+    override val freeModels = listOf("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash")
+    override val signupUrl = "https://aistudio.google.com/app/apikey"
 
     private val jsonMedia = "application/json".toMediaType()
 

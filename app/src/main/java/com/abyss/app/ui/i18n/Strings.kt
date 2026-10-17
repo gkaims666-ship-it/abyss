@@ -143,6 +143,19 @@ abstract class Strings {
     abstract val providerOnDevice: String
     abstract val keyConnected: String
     abstract val noKeyYet: String
+    abstract val freeTierReady: String
+    abstract val freeTierNote: String
+    abstract val paidKeyNote: String
+    abstract val getFreeKey: String
+    abstract val secDebug: String
+    abstract val selfReview: String
+    abstract val selfReviewSub: String
+    abstract val run: String
+    abstract val reviewTitle: String
+    abstract val reviewRun: String
+    abstract val reviewRunning: String
+    abstract val reviewCopy: String
+    abstract val reviewIdle: String
 
     // ---- notes
     abstract val searchHint: String

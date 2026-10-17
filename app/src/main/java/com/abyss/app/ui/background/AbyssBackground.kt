@@ -132,10 +132,9 @@ class AbyssBackgroundState {
     internal var viewH = 0f
 
     /**
-     * True while a tab is sliding. The living background then holds its last
-     * frame (no sim step, no redraw, no obstacle churn), so the whole frame
-     * budget goes to the transition — the difference between a janky switch and
-     * a clean 120 Hz one.
+     * True while a tab is sliding. The background keeps living (the pager slide
+     * is cheap now), but obstacle rims are suppressed so stale rects — whose
+     * owners are translating with the pager — can't ghost to one side.
      */
     @Volatile internal var transitioning = false
 
@@ -248,6 +247,17 @@ class AbyssBackgroundState {
 
     /** Request the animated black-hole toggle (tap on the mark). */
     fun requestHoleToggle() { holeToggleReq++ }
+
+    /**
+     * Collapse factor for the suck animation: 0 = everything at rest, 1 = fully
+     * drawn into the singularity. Rises on collapse, falls on restore. The water
+     * shader and the glyphs read this to stream directly into the hole — there is
+     * no whole-layer scaling any more.
+     */
+    internal fun holeK(): Float {
+        if (!holeActive || holeCenter == Offset.Unspecified) return 0f
+        return (if (holeExpand) 1f - holePhase else holePhase).coerceIn(0f, 1f)
+    }
 
     internal fun beginCharge(at: Offset) { charging = true; chargeStart = System.nanoTime(); chargePos = at }
     internal fun cancelCharge() { charging = false }
@@ -480,12 +490,10 @@ fun AbyssAnimatedBackground(
             while (true) {
                 withFrameNanos { now ->
                     if (state.startNanos == 0L) state.startNanos = now
-                    // Hold still during tab slides: no sim, no redraw, all the
-                    // frame budget goes to the transition.
-                    if (state.transitioning) { clock[0] = now; return@withFrameNanos }
                     val last = clock[0]
                     val dt = if (last == 0L) 0f else ((now - last) / 1_000_000_000f).coerceAtMost(0.05f)
                     clock[0] = now
+                    com.abyss.app.core.debug.PerfMonitor.frame(dt)
                     val t = state.timeSec(now)
 
                     val k = (dt * 3.5f).coerceAtMost(1f)
@@ -690,7 +698,15 @@ private fun DrawScope.drawWater(
         state.packObstacles(state.timeSec(now))
         shader.setFloatUniform("uObs", state.obsA)
         shader.setFloatUniform("uObsB", state.obsB)
-        shader.setFloatUniform("uObsN", state.obsN.toFloat())
+        // During a tab slide the obstacle rects are stale (their owners are
+        // translating with the pager), so their rims would ghost to one side.
+        // Drop them to zero while transitioning — the rims fade out cleanly.
+        shader.setFloatUniform("uObsN", if (state.transitioning) 0f else state.obsN.toFloat())
+        val hc = state.holeCenter
+        val hk = state.holeK()
+        shader.setFloatUniform("uHole",
+            if (hc == Offset.Unspecified) 0f else hc.x,
+            if (hc == Offset.Unspecified) 0f else hc.y, hk)
         drawRect(ShaderBrush(shader))
     } else {
         drawRect(palette.background)
@@ -766,6 +782,10 @@ private fun DrawScope.drawOverCrests(
             shader.setFloatUniform("uAccent", palette.wave.red, palette.wave.green, palette.wave.blue)
             shader.setFloatUniform("uAccent2", palette.secondary.red, palette.secondary.green, palette.secondary.blue)
             shader.setFloatUniform("uDark", if (palette.dark) 1f else 0f)
+            val hc = state.holeCenter
+            shader.setFloatUniform("uHole",
+                if (hc == Offset.Unspecified) 0f else hc.x,
+                if (hc == Offset.Unspecified) 0f else hc.y, state.holeK())
             brush = ShaderBrush(shader)
         }
         val r = o.radius.coerceAtMost(minOf(o.r - o.l, o.b - o.t) / 2f)
@@ -840,6 +860,23 @@ private fun DrawScope.drawGlyphs(
             glow = max(glow, charge * 0.6f * exp(-(d / 200f) * (d / 200f)))
         }
 
+        // Black-hole suck: each symbol spirals into the singularity directly
+        // (not a whole-layer scale). Rises on collapse, reverses on restore.
+        var holeFade = 1f
+        val hk = state.holeK()
+        if (hk > 0.001f && state.holeCenter != Offset.Unspecified) {
+            val e = hk * hk * (3f - 2f * hk)
+            val rx = x - state.holeCenter.x
+            val ry = y - state.holeCenter.y
+            val ang = e * (3.2f + g.layer * 0.6f)
+            val ca = cos(ang); val sa = sin(ang)
+            val shrink = 1f - e * 0.97f
+            x = state.holeCenter.x + (rx * ca - ry * sa) * shrink
+            y = state.holeCenter.y + (rx * sa + ry * ca) * shrink
+            glow = max(glow, e * 0.5f)                 // flare as it is drawn in
+            holeFade = (1f - e * e).coerceIn(0f, 1f)   // then vanish at the point
+        }
+
         // Symbol re-roll: a new character every ~0.2 s, each glyph on its own beat.
         val tt = now + g.offsetNs
         val slot = (tt / g.periodNs).toInt()
@@ -854,7 +891,7 @@ private fun DrawScope.drawGlyphs(
 
         var alpha = g.baseAlpha * (0.4f + 0.6f * tw) + sheen * 0.12f + glow * 0.75f
         if (fresh < 0.2f) alpha += 0.05f * (1f - fresh * 5f)    // a flicker on every change
-        alpha *= (1f - dimK * (1f - glow))
+        alpha *= (1f - dimK * (1f - glow)) * holeFade
         if (alpha < 0.012f) continue   // invisible → not emitted
 
         val rgb = mixRgb(mixRgb(at.symbol, at.secondary, sheen * 0.85f), at.wave, glow)
@@ -965,10 +1002,25 @@ uniform shader uWall;
 uniform float4 uObs[40];
 uniform float4 uObsB[40];
 uniform float uObsN;
+// (x, y) in px of the black hole, z = collapse strength 0..1.
+uniform float3 uHole;
 
 float dec(float s) {
     float e = s * 2.0 - 1.0;
     return e / max(1.0 - abs(e), 0.02);
+}
+
+// Spiral the sample point into the black hole: rotate around the centre and
+// draw it inward as the collapse strength rises, so the water itself streams in.
+float2 suck(float2 p) {
+    if (uHole.z <= 0.001) return p;
+    float2 d = p - uHole.xy;
+    float r = length(d);
+    float ang = uHole.z * 2.4 * (1.0 - clamp(r / 1500.0, 0.0, 0.88));
+    float ca = cos(ang);
+    float sa = sin(ang);
+    float2 rot = float2(d.x * ca - d.y * sa, d.x * sa + d.y * ca);
+    return uHole.xy + rot * (1.0 - uHole.z * 0.92);
 }
 
 // Smooth-bilinear: warp the sample so the hardware's linear filter reconstructs
@@ -983,6 +1035,17 @@ float2 sm(float2 c) {
     return b + 0.5 + f;
 }
 
+// Smooth-bilinear + a light 5-tap blur across cell boundaries, so even a very
+// busy grid reconstructs as a flat, rounded surface with no facets at all.
+float4 fld(float2 c) {
+    float4 s = float4(uField.eval(sm(c))) * 0.44;
+    s += float4(uField.eval(sm(c + float2(0.62, 0.0)))) * 0.14;
+    s += float4(uField.eval(sm(c - float2(0.62, 0.0)))) * 0.14;
+    s += float4(uField.eval(sm(c + float2(0.0, 0.62)))) * 0.14;
+    s += float4(uField.eval(sm(c - float2(0.0, 0.62)))) * 0.14;
+    return s;
+}
+
 float energyAt(float2 c) {
     float4 f = float4(uField.eval(sm(c)));
     float h = dec(f.r);
@@ -991,9 +1054,10 @@ float energyAt(float2 c) {
 }
 
 half4 main(float2 p) {
+    p = suck(p);
     // Grid cell (x,y) covers [(x-1)*cell, x*cell): +1 cell offset, sample at centre.
     float2 c = p / uCell + float2(1.0, 1.0);
-    float4 f = float4(uField.eval(sm(c)));
+    float4 f = fld(c);
     float h = dec(f.r);
     float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
     float slope = length(g);
@@ -1077,6 +1141,8 @@ half4 main(float2 p) {
         col = mix(col, lit, clamp(emis * 0.9, 0.0, 0.85));
     }
     col = mix(col, uBg * 0.6, (trough * 0.12 + underIn * 0.10) * k);
+    // Dissolve into the void as it is drawn in.
+    col = mix(col, uBg, uHole.z * uHole.z);
     col = min(col, float3(1.0));
     return half4(col.r, col.g, col.b, 1.0);
 }
@@ -1094,10 +1160,22 @@ uniform float3 uAccent;
 uniform float3 uAccent2;
 uniform float uDark;
 uniform shader uField;
+uniform float3 uHole;
 
 float dec(float s) {
     float e = s * 2.0 - 1.0;
     return e / max(1.0 - abs(e), 0.02);
+}
+
+float2 suck(float2 p) {
+    if (uHole.z <= 0.001) return p;
+    float2 d = p - uHole.xy;
+    float r = length(d);
+    float ang = uHole.z * 2.4 * (1.0 - clamp(r / 1500.0, 0.0, 0.88));
+    float ca = cos(ang);
+    float sa = sin(ang);
+    float2 rot = float2(d.x * ca - d.y * sa, d.x * sa + d.y * ca);
+    return uHole.xy + rot * (1.0 - uHole.z * 0.92);
 }
 
 float2 sm(float2 c) {
@@ -1108,9 +1186,19 @@ float2 sm(float2 c) {
     return b + 0.5 + f;
 }
 
+float4 fld(float2 c) {
+    float4 s = float4(uField.eval(sm(c))) * 0.44;
+    s += float4(uField.eval(sm(c + float2(0.62, 0.0)))) * 0.14;
+    s += float4(uField.eval(sm(c - float2(0.62, 0.0)))) * 0.14;
+    s += float4(uField.eval(sm(c + float2(0.0, 0.62)))) * 0.14;
+    s += float4(uField.eval(sm(c - float2(0.0, 0.62)))) * 0.14;
+    return s;
+}
+
 half4 main(float2 p) {
+    p = suck(p);
     float2 c = p / uCell + float2(1.0, 1.0);
-    float4 f = float4(uField.eval(sm(c)));
+    float4 f = fld(c);
     float h = dec(f.r);
     float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
     float slope = length(g);
@@ -1121,7 +1209,7 @@ half4 main(float2 p) {
     float glint = 0.5 + 0.5 * sin(p.x * 0.05 + p.y * 0.035 + uTime * 2.6 + h * 6.0);
     float energy = clamp(abs(h) * 2.2 + slope * 3.4, 0.0, 1.0);
     float a = crest * 0.46 + front * 0.38 * (0.6 + 0.4 * glint) + spec * 0.72 * energy;
-    a = clamp(a * (uDark > 0.5 ? 1.0 : 0.8), 0.0, 0.78);
+    a = clamp(a * (uDark > 0.5 ? 1.0 : 0.8), 0.0, 0.78) * (1.0 - uHole.z);
     float3 col = mix(uAccent, uAccent2, clamp(0.5 + h * 0.9, 0.0, 1.0)) * 1.15 + float3(0.05);
     col = min(mix(col, float3(1.0), spec * 0.5), float3(1.0));
     return half4(col.r * a, col.g * a, col.b * a, a);

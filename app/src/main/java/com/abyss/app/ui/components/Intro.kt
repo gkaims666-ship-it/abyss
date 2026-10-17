@@ -1,7 +1,7 @@
 package com.abyss.app.ui.components
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -28,9 +28,11 @@ import com.abyss.app.ui.theme.AbyssPalette
 fun AbyssIntro(palette: AbyssPalette, onCollapse: () -> Unit, onDone: () -> Unit) {
     val p = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
-        p.animateTo(0.55f, tween(470, easing = FastOutSlowInEasing))
+        // Gravitational collapse: a slow swell, then an accelerating plunge into
+        // a point — eased so the two phases meet with matched velocity (no jolt).
+        p.animateTo(0.55f, tween(560, easing = FastOutSlowInEasing))
         onCollapse()
-        p.animateTo(1f, tween(380, easing = FastOutLinearInEasing))
+        p.animateTo(1f, tween(520, easing = IntoPoint))
         onDone()
     }
 
@@ -38,7 +40,10 @@ fun AbyssIntro(palette: AbyssPalette, onCollapse: () -> Unit, onDone: () -> Unit
         Modifier.fillMaxSize()
             .graphicsLayer {
                 val v = p.value
-                alpha = if (v < 0.55f) 1f else (1f - (v - 0.55f) / 0.45f).coerceIn(0f, 1f)
+                // Hold opaque through the swell, then dissolve smoothstep'd so the
+                // UI bleeds through exactly as the mark reaches the singularity.
+                val d = ((v - 0.55f) / 0.45f).coerceIn(0f, 1f)
+                alpha = 1f - d * d * (3f - 2f * d)
             }
             .background(palette.background)
             .blockTaps(),
@@ -48,11 +53,23 @@ fun AbyssIntro(palette: AbyssPalette, onCollapse: () -> Unit, onDone: () -> Unit
             palette, size = 132.dp, speedMs = 1100, pulse = true, detailed = true,
             modifier = Modifier.graphicsLayer {
                 val v = p.value
-                val s = if (v < 0.55f) 0.86f + 0.22f * (v / 0.55f)          // grow in
-                else 1.08f * (1f - (v - 0.55f) / 0.45f).coerceIn(0f, 1f)  // collapse to a point
+                val s: Float; val spin: Float
+                if (v < 0.55f) {
+                    val a = v / 0.55f
+                    s = 0.80f + 0.30f * (a * a * (3f - 2f * a))   // ease-in swell to 1.10×
+                    spin = 0f
+                } else {
+                    val b = (v - 0.55f) / 0.45f
+                    val e = b * b                                 // accelerate inward
+                    s = 1.10f * (1f - e)                          // collapse to a point
+                    spin = -70f * e                               // whirl as it falls in
+                }
                 scaleX = s; scaleY = s
-                rotationZ = if (v < 0.55f) 0f else -40f * ((v - 0.55f) / 0.45f)
+                rotationZ = spin
             },
         )
     }
 }
+
+/** Accelerating plunge: slow lip, fast fall into the singularity. */
+private val IntoPoint = CubicBezierEasing(0.6f, 0f, 0.9f, 0.25f)

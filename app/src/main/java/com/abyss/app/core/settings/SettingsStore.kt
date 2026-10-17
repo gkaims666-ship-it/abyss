@@ -15,8 +15,10 @@ private val Context.dataStore by preferencesDataStore(name = "abyss_settings")
 
 data class AbyssSettings(
     val paletteId: String = "abyss",
-    val providerId: String = "openai",
-    val model: String = "gpt-4o",
+    // Default to the widest free door: OpenRouter's free DeepSeek V3. It needs
+    // only a free key (prompted on first send) — no paid plan, no shared creds.
+    val providerId: String = "openrouter",
+    val model: String = "deepseek/deepseek-chat-v3-0324:free",
     val agentId: String = "auto",
     val backgroundHarvest: Boolean = false, // off by default: it spends money/tokens
     // Translator (X-style)
@@ -71,8 +73,8 @@ class SettingsStore(private val context: Context) {
     val settings: Flow<AbyssSettings> = context.dataStore.data.map { p ->
         AbyssSettings(
             paletteId = p[Keys.palette] ?: "abyss",
-            providerId = p[Keys.provider] ?: "openai",
-            model = p[Keys.model] ?: "gpt-4o",
+            providerId = p[Keys.provider] ?: "openrouter",
+            model = p[Keys.model] ?: "deepseek/deepseek-chat-v3-0324:free",
             agentId = p[Keys.agent] ?: "auto",
             backgroundHarvest = p[Keys.harvest] ?: false,
             targetLang = p[Keys.targetLang] ?: "en",

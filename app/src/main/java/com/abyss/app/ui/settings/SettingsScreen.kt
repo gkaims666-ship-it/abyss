@@ -38,6 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatterySaver
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Key
@@ -76,6 +77,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -105,6 +107,7 @@ fun SettingsScreen(
     vm: ChatViewModel,
     palette: AbyssPalette,
     onOpenPermissions: () -> Unit,
+    onOpenDebug: () -> Unit = {},
 ) {
     // Settings only — not the chat: this screen stays alive in the background and
     // must not re-render for every streamed token.
@@ -208,8 +211,22 @@ fun SettingsScreen(
                                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                         p.models.forEach { m ->
-                                            Chip(m, selected = s.model == m, palette = palette) { vm.setModel(m) }
+                                            Chip(m, selected = s.model == m, palette = palette,
+                                                free = m in p.freeModels) { vm.setModel(m) }
                                         }
+                                    }
+                                    // Honest free-tier note + one-tap link to a free key.
+                                    if (!p.keyless && p.signupUrl != null && keySet[p.id] != true) {
+                                        Spacer(Modifier.size(10.dp))
+                                        val uriHandler = LocalUriHandler.current
+                                        Text(
+                                            if (p.freeModels.isNotEmpty()) S.freeTierNote else S.paidKeyNote,
+                                            color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp)
+                                        Text(S.getFreeKey, color = palette.primary, fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(8.dp))
+                                                .clickable { runCatching { uriHandler.openUri(p.signupUrl!!) } }
+                                                .padding(vertical = 4.dp))
                                     }
                                     Spacer(Modifier.size(10.dp))
                                     var custom by remember(p.id) { mutableStateOf("") }
@@ -367,6 +384,18 @@ fun SettingsScreen(
                 }
             }
 
+            // ---------------------------------------------------------------- debug
+            Appear(340) {
+                Column {
+                    SectionLabel(S.secDebug, palette)
+                    Group(palette) {
+                        NavRow(Icons.Filled.BugReport, S.selfReview, palette,
+                            value = S.run, onClick = onOpenDebug)
+                    }
+                    Footnote(S.selfReviewSub, palette)
+                }
+            }
+
             // ---------------------------------------------------------------- footer
             Column(Modifier.fillMaxWidth().padding(top = 34.dp, bottom = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Abyss", color = palette.onSurface.copy(alpha = 0.55f), fontFamily = AbyssFonts.Display, fontSize = 18.sp)
@@ -385,8 +414,9 @@ fun SettingsScreen(
 // ==================================================================== building blocks
 
 private fun statusText(S: Strings, p: LlmProvider, hasKey: Boolean): String = when {
-    p.id == "local" -> S.providerOnDevice
+    p.keyless -> S.providerOnDevice
     hasKey -> S.keyConnected
+    p.freeModels.isNotEmpty() -> S.freeTierReady   // newest models, free with your own free key
     else -> S.noKeyYet
 }
 
@@ -544,7 +574,7 @@ private fun PillButton(text: String, palette: AbyssPalette, enabled: Boolean = t
 }
 
 @Composable
-private fun Chip(text: String, selected: Boolean, palette: AbyssPalette, onClick: () -> Unit) {
+private fun Chip(text: String, selected: Boolean, palette: AbyssPalette, free: Boolean = false, onClick: () -> Unit) {
     val bg by animateColorAsState(if (selected) palette.primary.copy(alpha = 0.16f) else Color.Transparent, tween(200), label = "cb")
     val br by animateColorAsState(if (selected) palette.primary else palette.outline, tween(200), label = "cr")
     Row(
@@ -558,6 +588,12 @@ private fun Chip(text: String, selected: Boolean, palette: AbyssPalette, onClick
         }
         Text(text, color = if (selected) palette.primary else palette.onSurface.copy(alpha = 0.8f),
             fontSize = 12.5.sp, fontFamily = AbyssFonts.Code)
+        if (free) {
+            Spacer(Modifier.width(6.dp))
+            Text("FREE", color = palette.primary, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(5.dp))
+                    .background(palette.primary.copy(alpha = 0.16f)).padding(horizontal = 5.dp, vertical = 2.dp))
+        }
     }
 }
 

@@ -33,7 +33,7 @@ import com.abyss.app.ui.chat.ChatViewModel
 import com.abyss.app.ui.feature.perms.PermissionsScreen
 import com.abyss.app.ui.theme.AbyssPalette
 
-private enum class SettingsRoute { Main, Permissions }
+private enum class SettingsRoute { Main, Permissions, Debug }
 
 @Composable
 fun SettingsHost(vm: ChatViewModel, palette: AbyssPalette) {
@@ -43,7 +43,7 @@ fun SettingsHost(vm: ChatViewModel, palette: AbyssPalette) {
     AnimatedContent(
         targetState = route,
         transitionSpec = {
-            if (targetState == SettingsRoute.Permissions)
+            if (targetState != SettingsRoute.Main)
                 slideInHorizontally(tween(240)) { it }
                     .togetherWith(slideOutHorizontally(tween(240)) { -it / 3 })
             else
@@ -55,11 +55,17 @@ fun SettingsHost(vm: ChatViewModel, palette: AbyssPalette) {
         val fade = fadeLayer(240, 240)
         when (current) {
             SettingsRoute.Main -> Box(fade) {
-                SettingsScreen(vm, palette, onOpenPermissions = { route = SettingsRoute.Permissions })
+                SettingsScreen(vm, palette,
+                    onOpenPermissions = { route = SettingsRoute.Permissions },
+                    onOpenDebug = { route = SettingsRoute.Debug })
             }
             SettingsRoute.Permissions -> Column(Modifier.fillMaxSize().then(fade)) {
                 com.abyss.app.ui.components.BackBar(com.abyss.app.ui.i18n.LocalStrings.current.permissions, palette) { route = SettingsRoute.Main }
                 PermissionsScreen(palette)
+            }
+            SettingsRoute.Debug -> Column(Modifier.fillMaxSize().then(fade)) {
+                com.abyss.app.ui.components.BackBar(com.abyss.app.ui.i18n.LocalStrings.current.reviewTitle, palette) { route = SettingsRoute.Main }
+                DebugReviewScreen(palette)
             }
         }
     }
