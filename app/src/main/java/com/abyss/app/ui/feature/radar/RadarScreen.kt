@@ -79,6 +79,9 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -123,6 +126,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.abyss.app.feature.radar.AircraftInfo
+import com.abyss.app.feature.radar.Bookmark
+import com.abyss.app.feature.radar.Bookmarks
 import com.abyss.app.feature.radar.MapCamera
 import com.abyss.app.feature.radar.CamKind
 import com.abyss.app.feature.radar.GeoBox
@@ -308,6 +313,8 @@ private class RadarController(private val app: Context, private val scope: Corou
 
     // Long-press pin + reverse geocode
     var pin by mutableStateOf<DoubleArray?>(null)
+    var bookmarks by mutableStateOf<List<Bookmark>>(emptyList())
+    var bookmarksOpen by mutableStateOf(false)
     var pinPlace by mutableStateOf<Place?>(null)
     var pinLoading by mutableStateOf(false)
 
@@ -400,6 +407,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         alertsOn = prefs.getBoolean("alerts", false)
         sheltersOn = prefs.getBoolean("shelters", false)
         alertsBg = prefs.getBoolean("alerts_bg", false)
+        bookmarks = Bookmarks.decode(prefs.getString("bookmarks", null))
         if (alertsBg) com.abyss.app.feature.radar.AlertService.start(app)
         dark = null   // force first tile source
         applyLayer()
@@ -841,6 +849,31 @@ private class RadarController(private val app: Context, private val scope: Corou
     fun clearPin() {
         pin = null; pinPlace = null; pinLoading = false
         pinFolder?.items?.clear(); map?.invalidate()
+    }
+
+    fun pinSaved(): Boolean { val p = pin ?: return false; return Bookmarks.has(bookmarks, p[0], p[1]) }
+
+    /** Save (or un-save) the current pin as a named place. */
+    fun toggleSavePin() {
+        val p = pin ?: return
+        val id = Bookmarks.idFor(p[0], p[1])
+        bookmarks = if (Bookmarks.has(bookmarks, p[0], p[1])) Bookmarks.remove(bookmarks, id)
+        else {
+            val name = pinPlace?.name?.takeIf { it.isNotBlank() } ?: "%.4f, %.4f".format(java.util.Locale.US, p[0], p[1])
+            Bookmarks.add(bookmarks, Bookmark(id, name, p[0], p[1]))
+        }
+        prefs.edit().putString("bookmarks", Bookmarks.encode(bookmarks)).apply()
+    }
+
+    fun removeBookmark(id: String) {
+        bookmarks = Bookmarks.remove(bookmarks, id)
+        prefs.edit().putString("bookmarks", Bookmarks.encode(bookmarks)).apply()
+    }
+
+    fun goToBookmark(b: Bookmark, lang: String) {
+        bookmarksOpen = false
+        flyTo(b.lat, b.lon, (map?.zoomLevelDouble ?: 13.0).coerceAtLeast(13.0))
+        dropPin(b.lat, b.lon, lang)
     }
 
     // ------------------------------------------------------------ measure
@@ -1542,7 +1575,7 @@ fun RadarScreen(palette: AbyssPalette) {
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     BackHandler(enabled = active && (ctl.selected != null || ctl.selectedEvent != null || ctl.selectedRoad != null ||
-        ctl.selectedCam != null || ctl.selectedShelter != null || ctl.nearestShelters != null || ctl.historyOpen || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
+        ctl.selectedCam != null || ctl.selectedShelter != null || ctl.nearestShelters != null || ctl.historyOpen || ctl.bookmarksOpen || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
         when {
             ctl.sheetOpen -> ctl.sheetOpen = false
             ctl.roadListOpen -> ctl.roadListOpen = false
@@ -1550,6 +1583,7 @@ fun RadarScreen(palette: AbyssPalette) {
             ctl.selectedShelter != null -> ctl.selectedShelter = null
             ctl.nearestShelters != null -> ctl.clearNearest()
             ctl.historyOpen -> ctl.historyOpen = false
+            ctl.bookmarksOpen -> ctl.bookmarksOpen = false
             ctl.selectedRoad != null -> ctl.selectedRoad = null
             ctl.results != null -> ctl.results = null
             ctl.placeResults != null -> ctl.placeResults = null
@@ -1650,6 +1684,7 @@ fun RadarScreen(palette: AbyssPalette) {
             }
             if (ctl.orientation != 0f) RoundButton(Icons.Filled.Explore, S.radarResetNorth, palette, iconRotation = -ctl.orientation) { ctl.resetNorth() }
             RoundButton(Icons.Filled.Layers, S.radarLayers, palette, active = ctl.sheetOpen) { ctl.sheetOpen = true }
+            if (ctl.bookmarks.isNotEmpty()) RoundButton(Icons.Filled.Bookmarks, S.radarBookmarks, palette) { ctl.bookmarksOpen = true }
             RoundButton(Icons.Filled.MyLocation, S.radarMyLocation, palette) {
                 if (!ctl.locate()) locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
             }
@@ -1720,6 +1755,7 @@ fun RadarScreen(palette: AbyssPalette) {
                     PinCard(pt, ctl.pinPlace, ctl.pinLoading, ctl.me, ctl.metric, palette, S,
                         onCopy = { clipboard.setText(AnnotatedString("%.5f, %.5f".format(java.util.Locale.US, pt[0], pt[1]))) },
                         onShare = { ctl.openUrl("https://www.openstreetmap.org/?mlat=%.5f&mlon=%.5f#map=15/%.5f/%.5f".format(java.util.Locale.US, pt[0], pt[1], pt[0], pt[1])) },
+                        saved = ctl.pinSaved(), onSave = { ctl.toggleSavePin() },
                         onClose = { ctl.clearPin() })
                 }
             }
@@ -1765,6 +1801,15 @@ fun RadarScreen(palette: AbyssPalette) {
         AnimatedVisibility(ctl.historyOpen, modifier = Modifier.align(Alignment.BottomCenter),
             enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
             HistorySheet(ctl.alertHistory, palette, S) { ctl.historyOpen = false }
+        }
+        AnimatedVisibility(ctl.bookmarksOpen, enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
+                .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { ctl.bookmarksOpen = false })
+        }
+        AnimatedVisibility(ctl.bookmarksOpen, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+            BookmarksSheet(ctl.bookmarks, ctl.me, ctl.metric, palette, S,
+                onPick = { ctl.goToBookmark(it, S.code) }, onDelete = { ctl.removeBookmark(it) }, onClose = { ctl.bookmarksOpen = false })
         }
 
         // Long-press hint, shown briefly when the map is idle and empty-handed.
@@ -1912,7 +1957,8 @@ private fun MeasureBar(totalNm: Double, metric: Boolean, palette: AbyssPalette, 
 @Composable
 private fun PinCard(
     pt: DoubleArray, place: Place?, loading: Boolean, me: DoubleArray?, metric: Boolean,
-    palette: AbyssPalette, S: Strings, onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
+    palette: AbyssPalette, S: Strings, saved: Boolean, onSave: () -> Unit,
+    onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
@@ -1927,6 +1973,10 @@ private fun PinCard(
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (place?.detail != null) Text(place.detail, color = palette.onSurface.copy(alpha = 0.6f),
                     fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Box(Modifier.size(34.dp).clip(CircleShape).clickable(onClick = onSave), contentAlignment = Alignment.Center) {
+                Icon(if (saved) Icons.Filled.Star else Icons.Filled.StarBorder,
+                    S.radarSave, tint = if (saved) palette.primary else palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
             }
             Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
@@ -2917,5 +2967,51 @@ private fun ScaleBar(ctl: RadarController, palette: AbyssPalette, S: Strings) {
                     },
             )
         }
+    }
+}
+
+@Composable
+private fun BookmarksSheet(
+    list: List<Bookmark>, me: DoubleArray?, metric: Boolean, palette: AbyssPalette, S: Strings,
+    onPick: (Bookmark) -> Unit, onDelete: (String) -> Unit, onClose: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding().heightIn(max = 520.dp)
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(palette.surface)
+            .border(1.dp, palette.outline, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).padding(top = 14.dp),
+    ) {
+        Box(Modifier.align(Alignment.CenterHorizontally).size(width = 34.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp)).background(palette.outline))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Bookmarks, null, tint = palette.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(S.radarBookmarks, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp, modifier = Modifier.weight(1f))
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(17.dp))
+            }
+        }
+        if (list.isEmpty()) {
+            Text(S.radarNoBookmarks, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 14.sp,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+        } else LazyColumn {
+            items(list, key = { it.id }) { b ->
+                Row(Modifier.fillMaxWidth().clickable { onPick(b) }.padding(horizontal = 18.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Place, null, tint = palette.primary, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(b.name, color = palette.onSurface, fontSize = 14.5.sp, fontWeight = FontWeight.Medium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val d = me?.let { " · " + dist(distanceNm(it[0], it[1], b.lat, b.lon), metric, S) } ?: ""
+                        Text("%.4f, %.4f%s".format(java.util.Locale.US, b.lat, b.lon, d),
+                            color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    }
+                    Box(Modifier.size(32.dp).clip(CircleShape).clickable { onDelete(b.id) }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Close, S.radarClear, tint = palette.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
     }
 }

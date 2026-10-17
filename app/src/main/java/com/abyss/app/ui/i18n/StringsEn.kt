@@ -461,4 +461,9 @@ object StringsEn : Strings() {
     override val vpnSortSpeed = "by speed"
     override val vpnSortAdded = "by added"
     override fun vpnSubFailed(reason: String) = "Import failed ($reason)"
+
+    // ---- radar: saved places
+    override val radarBookmarks = "Saved places"
+    override val radarNoBookmarks = "No saved places yet"
+    override val radarSave = "Save"
 }

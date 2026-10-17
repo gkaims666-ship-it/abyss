@@ -470,6 +470,11 @@ abstract class Strings {
     abstract val vpnSortAdded: String
     abstract fun vpnSubFailed(reason: String): String
 
+    // ---- radar: saved places
+    abstract val radarBookmarks: String
+    abstract val radarNoBookmarks: String
+    abstract val radarSave: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

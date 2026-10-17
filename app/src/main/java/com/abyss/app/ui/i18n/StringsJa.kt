@@ -461,4 +461,9 @@ object StringsJa : Strings() {
     override val vpnSortSpeed = "速度順"
     override val vpnSortAdded = "追加順"
     override fun vpnSubFailed(reason: String) = "インポート失敗（$reason）"
+
+    // ---- radar: saved places
+    override val radarBookmarks = "保存した場所"
+    override val radarNoBookmarks = "保存した場所はまだありません"
+    override val radarSave = "保存"
 }

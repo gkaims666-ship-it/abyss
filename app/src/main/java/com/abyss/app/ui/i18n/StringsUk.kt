@@ -461,4 +461,9 @@ object StringsUk : Strings() {
     override val vpnSortSpeed = "за швидкістю"
     override val vpnSortAdded = "за додаванням"
     override fun vpnSubFailed(reason: String) = "Не вдалося імпортувати ($reason)"
+
+    // ---- radar: saved places
+    override val radarBookmarks = "Збережені місця"
+    override val radarNoBookmarks = "Збережених місць поки немає"
+    override val radarSave = "Зберегти"
 }

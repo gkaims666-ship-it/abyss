@@ -461,4 +461,9 @@ object StringsTr : Strings() {
     override val vpnSortSpeed = "hıza göre"
     override val vpnSortAdded = "eklemeye göre"
     override fun vpnSubFailed(reason: String) = "İçe aktarma başarısız ($reason)"
+
+    // ---- radar: saved places
+    override val radarBookmarks = "Kayıtlı yerler"
+    override val radarNoBookmarks = "Henüz kayıtlı yer yok"
+    override val radarSave = "Kaydet"
 }

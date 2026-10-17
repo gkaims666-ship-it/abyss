@@ -461,4 +461,9 @@ object StringsZh : Strings() {
     override val vpnSortSpeed = "按速度"
     override val vpnSortAdded = "按添加"
     override fun vpnSubFailed(reason: String) = "导入失败（$reason）"
+
+    // ---- radar: saved places
+    override val radarBookmarks = "已保存的地点"
+    override val radarNoBookmarks = "还没有保存的地点"
+    override val radarSave = "保存"
 }
