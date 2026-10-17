@@ -453,4 +453,5 @@ object StringsZh : Strings() {
     override val safetyNoHistory = "暂无记录"
     override val safetyOngoing = "现在"
     override val safetyMinShort = "分钟"
+    override val safetyNotifBlocked = "通知已关闭 — 点按以允许"
 }

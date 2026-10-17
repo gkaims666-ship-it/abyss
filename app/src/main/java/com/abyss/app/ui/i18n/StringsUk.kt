@@ -453,4 +453,5 @@ object StringsUk : Strings() {
     override val safetyNoHistory = "Записів поки немає"
     override val safetyOngoing = "зараз"
     override val safetyMinShort = "хв"
+    override val safetyNotifBlocked = "Сповіщення вимкнено — натисніть, щоб дозволити"
 }

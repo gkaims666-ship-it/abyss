@@ -453,4 +453,5 @@ object StringsJa : Strings() {
     override val safetyNoHistory = "まだ記録がありません"
     override val safetyOngoing = "現在"
     override val safetyMinShort = "分"
+    override val safetyNotifBlocked = "通知がオフです — タップして許可"
 }

@@ -453,4 +453,5 @@ object StringsTr : Strings() {
     override val safetyNoHistory = "Henüz kayıt yok"
     override val safetyOngoing = "şimdi"
     override val safetyMinShort = "dk"
+    override val safetyNotifBlocked = "Bildirimler kapalı — izin vermek için dokun"
 }

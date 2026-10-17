@@ -453,4 +453,5 @@ object StringsEn : Strings() {
     override val safetyNoHistory = "No records yet"
     override val safetyOngoing = "now"
     override val safetyMinShort = "min"
+    override val safetyNotifBlocked = "Notifications are off — tap to allow"
 }

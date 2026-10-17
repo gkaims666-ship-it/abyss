@@ -461,6 +461,8 @@ abstract class Strings {
 
     abstract val safetyMinShort: String
 
+    abstract val safetyNotifBlocked: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

@@ -76,6 +76,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Icon
@@ -99,6 +100,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -129,6 +132,8 @@ import com.abyss.app.feature.radar.RoadIncident
 import com.abyss.app.feature.radar.RoadKeys
 import com.abyss.app.feature.radar.RoadKind
 import com.abyss.app.feature.radar.RoadLogic
+import com.abyss.app.feature.radar.MapScale
+import com.abyss.app.feature.radar.ScaleUnit
 import com.abyss.app.feature.radar.AlertKind
 import com.abyss.app.feature.radar.AlertLevel
 import com.abyss.app.feature.radar.AlertLogic
@@ -311,6 +316,7 @@ private class RadarController(private val app: Context, private val scope: Corou
     var measureTotalNm by mutableStateOf(0.0)
     private val measurePts = ArrayList<GeoPoint>()
     var orientation by mutableStateOf(0f)
+    var zoomUi by mutableStateOf(0f)
     var me by mutableStateOf<DoubleArray?>(null)
 
     var lastFetch = 0L
@@ -463,6 +469,8 @@ private class RadarController(private val app: Context, private val scope: Corou
         }
         val o = mv.mapOrientation
         if (kotlin.math.abs(o - orientation) > 0.4f || (o == 0f && orientation != 0f)) orientation = o
+        val z = mv.zoomLevelDouble.toFloat()
+        if (kotlin.math.abs(z - zoomUi) > 0.02f) zoomUi = z
         if (terminatorOn && System.currentTimeMillis() - terminatorAt > 60_000L) refreshTerminator()
         mv.invalidate()
     }
@@ -1636,8 +1644,11 @@ fun RadarScreen(palette: AbyssPalette) {
             Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            RoundButton(Icons.Filled.Shield, S.safetyFindShelter, palette, active = ctl.findingShelter) { ctl.findNearestShelter() }
-            if (ctl.orientation != 0f) RoundButton(Icons.Filled.Explore, S.radarResetNorth, palette) { ctl.resetNorth() }
+            RoundButton(Icons.Filled.Shield, S.safetyFindShelter, palette, active = ctl.findingShelter) {
+                if (ctl.me == null && !ctl.locate()) locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                ctl.findNearestShelter()
+            }
+            if (ctl.orientation != 0f) RoundButton(Icons.Filled.Explore, S.radarResetNorth, palette, iconRotation = -ctl.orientation) { ctl.resetNorth() }
             RoundButton(Icons.Filled.Layers, S.radarLayers, palette, active = ctl.sheetOpen) { ctl.sheetOpen = true }
             RoundButton(Icons.Filled.MyLocation, S.radarMyLocation, palette) {
                 if (!ctl.locate()) locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
@@ -1713,6 +1724,7 @@ fun RadarScreen(palette: AbyssPalette) {
                 }
             }
             Spacer(Modifier.height(8.dp))
+            ScaleBar(ctl, palette, S)
             StatusPill(ctl, palette, S)
             Text(S.radarCredit, color = palette.onSurface.copy(alpha = 0.45f), fontSize = 9.5.sp,
                 modifier = Modifier.padding(start = 6.dp, top = 4.dp))
@@ -1961,14 +1973,17 @@ private fun FilterChip(label: String, selected: Boolean, palette: AbyssPalette, 
 }
 
 @Composable
-private fun RoundButton(icon: ImageVector, desc: String, palette: AbyssPalette, active: Boolean = false, onClick: () -> Unit) {
+private fun RoundButton(icon: ImageVector, desc: String, palette: AbyssPalette, active: Boolean = false, iconRotation: Float = 0f, onClick: () -> Unit) {
     Box(
         Modifier.size(46.dp).clip(CircleShape)
             .background(if (active) palette.primary else palette.surface.copy(alpha = 0.94f))
             .border(1.dp, if (active) palette.primary else palette.outline, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = if (active) palette.onPrimary else palette.onSurface.copy(alpha = 0.85f), modifier = Modifier.size(21.dp)) }
+    ) {
+        Icon(icon, desc, tint = if (active) palette.onPrimary else palette.onSurface.copy(alpha = 0.85f),
+            modifier = Modifier.size(21.dp).graphicsLayer { if (iconRotation != 0f) rotationZ = iconRotation })
+    }
 }
 
 @Composable
@@ -2642,6 +2657,19 @@ private fun SafetySection(ctl: RadarController, palette: AbyssPalette, S: String
     }
     Text(S.safetyBackgroundHint, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.5.sp, lineHeight = 15.sp,
         modifier = Modifier.padding(start = 36.dp, bottom = 2.dp))
+    if (ctl.alertsBg && android.os.Build.VERSION.SDK_INT >= 33 &&
+        androidx.core.content.ContextCompat.checkSelfPermission(LocalContext.current, android.Manifest.permission.POST_NOTIFICATIONS) !=
+        android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 36.dp, top = 2.dp, bottom = 4.dp)
+                .clip(RoundedCornerShape(8.dp)).clickable { onNeedNotifPermission() },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.NotificationsOff, null, tint = palette.error, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(S.safetyNotifBlocked, color = palette.error, fontSize = 11.5.sp, lineHeight = 15.sp)
+        }
+    }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { ctl.openHistory() }
             .padding(vertical = 10.dp, horizontal = 4.dp),
@@ -2856,4 +2884,38 @@ private fun HistorySheet(list: List<com.abyss.app.feature.radar.AlertEvent>, pal
 private fun alertHistKind(name: String, S: Strings): String = when (name) {
     "AirRaid" -> S.alertAirRaid; "Artillery" -> S.alertArtillery; "UrbanFights" -> S.alertUrbanFights
     "Chemical" -> S.alertChemical; "Nuclear" -> S.alertNuclear; else -> S.alertOther
+}
+
+@Composable
+private fun ScaleBar(ctl: RadarController, palette: AbyssPalette, S: Strings) {
+    val zoom = ctl.zoomUi
+    if (zoom <= 0f) return
+    val density = LocalDensity.current.density
+    val maxPx = 96f * density
+    val lat = ctl.cam.lat
+    val c = remember(zoom, lat, ctl.metric) { MapScale.choose(lat, zoom.toDouble(), ctl.metric, maxPx) }
+    if (c.px < 2f) return
+    val label = c.value.toString() + " " + when (c.unit) {
+        ScaleUnit.M -> S.unitM; ScaleUnit.KM -> S.unitKm; ScaleUnit.FT -> S.unitFt; ScaleUnit.MI -> "mi"
+    }
+    val widthDp = (c.px / density).dp
+    Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(bottom = 4.dp)) {
+        Column(horizontalAlignment = Alignment.Start) {
+            Text(label, color = palette.onSurface.copy(alpha = 0.8f), fontSize = 10.5.sp,
+                modifier = Modifier.padding(start = 2.dp, bottom = 1.dp))
+            Box(
+                Modifier.width(widthDp).height(6.dp)
+                    .drawBehind {
+                        val stroke = 1.6f * density
+                        val col = palette.onSurface.copy(alpha = 0.8f)
+                        drawLine(col, androidx.compose.ui.geometry.Offset(0f, 0f),
+                            androidx.compose.ui.geometry.Offset(0f, size.height), stroke)
+                        drawLine(col, androidx.compose.ui.geometry.Offset(size.width, 0f),
+                            androidx.compose.ui.geometry.Offset(size.width, size.height), stroke)
+                        drawLine(col, androidx.compose.ui.geometry.Offset(0f, size.height),
+                            androidx.compose.ui.geometry.Offset(size.width, size.height), stroke)
+                    },
+            )
+        }
+    }
 }
