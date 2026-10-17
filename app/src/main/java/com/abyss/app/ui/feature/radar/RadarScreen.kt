@@ -100,7 +100,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.abyss.app.feature.radar.AircraftInfo
 import com.abyss.app.feature.radar.BaseLayer
+import com.abyss.app.feature.radar.FlightInfo
+import com.abyss.app.feature.radar.RadarSnapshot
+import com.abyss.app.feature.radar.RadarSource
 import com.abyss.app.feature.radar.GeoApi
 import com.abyss.app.feature.radar.MapEvent
 import com.abyss.app.feature.radar.PlanePhoto
@@ -118,6 +122,7 @@ import com.abyss.app.ui.i18n.Strings
 import com.abyss.app.ui.theme.AbyssFonts
 import com.abyss.app.ui.theme.AbyssPalette
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
@@ -144,6 +149,23 @@ import kotlin.math.roundToInt
 
 private enum class RadarFilter { All, Military, Emergency, Airborne }
 private enum class SearchMode { Planes, Places }
+
+/**
+ * osmdroid's MapView hosted in Compose: on touch-down it asks every parent not
+ * to intercept, so Compose hands the WHOLE gesture (drag, pinch, fling) to the
+ * map instead of cancelling it midway. Without this the map can refuse to pan.
+ */
+private class AbyssMapView(ctx: Context) : MapView(ctx) {
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN,
+            android.view.MotionEvent.ACTION_POINTER_DOWN -> parent?.requestDisallowInterceptTouchEvent(true)
+            android.view.MotionEvent.ACTION_UP,
+            android.view.MotionEvent.ACTION_CANCEL -> parent?.requestDisallowInterceptTouchEvent(false)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+}
 
 /** Inverts map tiles for a dark-theme "night" basemap (no keyed dark service). */
 private val NIGHT_FILTER = ColorMatrixColorFilter(ColorMatrix(floatArrayOf(
@@ -184,6 +206,12 @@ private class RadarController(private val app: Context, private val scope: Corou
     var terminatorOn by mutableStateOf(false)
     var photo by mutableStateOf<PlanePhoto?>(null)
     var photoBitmap by mutableStateOf<ImageBitmap?>(null)
+    var info by mutableStateOf<AircraftInfo?>(null)
+    var flight by mutableStateOf<FlightInfo?>(null)
+    // Live-position networks (all on by default; choice saved)
+    var sources by mutableStateOf(RadarSource.entries.toSet())
+    var sourceOk by mutableStateOf<Set<RadarSource>>(emptySet())
+    var sourceCounts by mutableStateOf<Map<RadarSource, Int>>(emptyMap())
     var selectedEvent by mutableStateOf<MapEvent?>(null)
     var planesOn by mutableStateOf(true)
     var sheetOpen by mutableStateOf(false)
@@ -236,7 +264,9 @@ private class RadarController(private val app: Context, private val scope: Corou
         cfg.osmdroidBasePath = File(ctx.cacheDir, "osmdroid")
         cfg.osmdroidTileCache = File(ctx.cacheDir, "osmdroid/tiles")
 
-        val mv = MapView(ctx)
+        val mv = AbyssMapView(ctx)
+        mv.isClickable = true
+        mv.isFlingEnabled = true
         mv.setMultiTouchControls(true)
         mv.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
         mv.isTilesScaledToDpi = true
@@ -274,6 +304,10 @@ private class RadarController(private val app: Context, private val scope: Corou
         mv.overlays.add(rotation)
 
         layer = BaseLayer.entries.firstOrNull { it.id == prefs.getString("layer", "abyss") } ?: BaseLayer.Abyss
+        prefs.getString("sources", null)?.let { saved ->
+            val set = saved.split(',').mapNotNull { id -> RadarSource.entries.firstOrNull { it.id == id } }.toSet()
+            if (set.isNotEmpty()) sources = set
+        }
         dark = null   // force first tile source
         applyLayer()
         applyPalette(palette)
@@ -350,16 +384,23 @@ private class RadarController(private val app: Context, private val scope: Corou
         tooWide = halfDiag > 250.0 && (f == RadarFilter.All || f == RadarFilter.Airborne)
         val radius = ceil(halfDiag * 1.08).toInt().coerceIn(5, 250)
         try {
+            val en = sources
+            suspend fun area(): List<Plane> {
+                val snap = RadarApi.around(c.latitude, c.longitude, radius,
+                    bb.latNorth, bb.latSouth, bb.lonEast, bb.lonWest, en)
+                applySnapshot(snap)
+                return snap.planes
+            }
             val list = when (f) {
-                RadarFilter.All -> RadarApi.around(c.latitude, c.longitude, radius)
-                RadarFilter.Airborne -> RadarApi.around(c.latitude, c.longitude, radius).filter { !it.onGround }
-                RadarFilter.Military -> RadarApi.military()
+                RadarFilter.All -> area()
+                RadarFilter.Airborne -> area().filter { !it.onGround }
+                RadarFilter.Military -> RadarApi.military(en)
                 RadarFilter.Emergency -> {
                     val all = LinkedHashMap<String, Plane>()
                     for (sq in listOf("7700", "7600", "7500")) {
-                        runCatching { RadarApi.bySquawk(sq) }.getOrNull()?.forEach { all[it.hex] = it }
+                        runCatching { RadarApi.bySquawk(sq, en) }.getOrNull()?.forEach { all[it.hex] = it }
                     }
-                    runCatching { RadarApi.around(c.latitude, c.longitude, radius) }.getOrNull()
+                    runCatching { area() }.getOrNull()
                         ?.filter { it.isEmergency }?.forEach { all[it.hex] = it }
                     all.values.toList()
                 }
@@ -370,7 +411,7 @@ private class RadarController(private val app: Context, private val scope: Corou
             lastOk = System.currentTimeMillis()
             selected?.let { s ->
                 val upd = list.firstOrNull { it.hex == s.hex }
-                    ?: runCatching { RadarApi.byHex(s.hex).firstOrNull() }.getOrNull()
+                    ?: runCatching { RadarApi.byHex(s.hex, sources).firstOrNull() }.getOrNull()
                 if (upd != null) { selected = upd; record(listOf(upd)) }
             }
         } catch (e: Exception) {
@@ -391,6 +432,20 @@ private class RadarController(private val app: Context, private val scope: Corou
     /** UI language tag, set by the screen so background lookups match it. */
     var currentLang: String = "en"
 
+
+    private fun applySnapshot(snap: RadarSnapshot) {
+        sourceOk = snap.ok
+        sourceCounts = snap.perSource
+    }
+
+    /** Turns a live-position network on/off (at least one stays on). */
+    fun toggleSource(src: RadarSource) {
+        val next = if (src in sources) sources - src else sources + src
+        if (next.isEmpty()) return
+        sources = next
+        prefs.edit().putString("sources", next.joinToString(",") { it.id }).apply()
+        dirty = true; lastFetch = 0L
+    }
 
     /** Remembers positions so a selected aircraft shows where it has been. */
     private fun record(list: List<Plane>) {
@@ -424,15 +479,21 @@ private class RadarController(private val app: Context, private val scope: Corou
         selected = p
         route = null
         if (p == null) following = false
-        photo = null; photoBitmap = null
+        photo = null; photoBitmap = null; info = null; flight = null
         photoJob?.cancel()
         if (p != null) {
+            // Registry + airline/route (adsbdb) and the photo, in parallel.
             photoJob = scope.launch {
+                val db = async { runCatching { RadarApi.adsbdb(p.hex, p.callsign) }.getOrNull() }
                 val ph = runCatching { GeoApi.planePhoto(p.hex) }.getOrNull()
+                val (ai, fi) = db.await() ?: (null to null)
                 if (selected?.hex != p.hex) return@launch
-                photo = ph
-                if (ph != null) {
-                    val bytes = runCatching { GeoApi.fetchBytes(ph.thumbUrl) }.getOrNull()
+                info = ai; flight = fi
+                if (route == null && fi?.route != null) { route = fi.route; push() }
+                val chosen = ph ?: ai?.photoThumb?.let { PlanePhoto(it, ai?.photo ?: it, null) }
+                photo = chosen
+                if (chosen != null) {
+                    val bytes = runCatching { GeoApi.fetchBytes(chosen.thumbUrl) }.getOrNull()
                     val bmp = bytes?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
                     if (selected?.hex == p.hex) photoBitmap = bmp?.asImageBitmap()
                 }
@@ -440,9 +501,9 @@ private class RadarController(private val app: Context, private val scope: Corou
         }
         push()
         val cs = p?.callsign ?: return
-        if (routeCache.containsKey(cs)) { route = routeCache[cs]; push(); return }
+        routeCache[cs]?.let { route = it; push(); return }
         scope.launch {
-            val r = runCatching { RadarApi.route(cs, p.lat, p.lon) }.getOrNull()
+            val r = runCatching { RadarApi.route(cs, p.lat, p.lon) }.getOrNull() ?: return@launch
             routeCache[cs] = r
             if (selected?.hex == p.hex) { route = r; push() }
         }
@@ -937,7 +998,7 @@ fun RadarScreen(palette: AbyssPalette) {
             }
             val sel = ctl.selected
             AnimatedVisibility(sel != null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
-                if (sel != null) PlaneCard(sel, ctl.route, ctl.following, ctl.metric, ctl.photoBitmap, ctl.photo, palette, S,
+                if (sel != null) PlaneCard(sel, ctl.route, ctl.following, ctl.metric, ctl.photoBitmap, ctl.photo, ctl.info, ctl.flight, palette, S,
                     onOpenPhoto = { ctl.openUrl(ctl.photo?.link) },
                     onFollow = { ctl.following = !ctl.following },
                     onClose = { ctl.select(null) })
@@ -1011,6 +1072,18 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) 
         ToggleRow(Icons.Filled.MenuBook, S.radarOverlayWiki, ctl.wikiOn, palette) { ctl.toggleWiki() }
         ToggleRow(Icons.Filled.Bolt, S.radarOverlayEvents, ctl.eventsOn, palette) { ctl.toggleEvents() }
         ToggleRow(Icons.Filled.DarkMode, S.radarOverlayTerminator, ctl.terminatorOn, palette) { ctl.toggleTerminator() }
+        Spacer(Modifier.height(18.dp))
+        Text(S.radarSources, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
+        Spacer(Modifier.height(6.dp))
+        for (src in RadarSource.entries) {
+            val on = src in ctl.sources
+            val n = ctl.sourceCounts[src]
+            val okNow = src in ctl.sourceOk
+            val label = if (on && n != null) "${src.label} · $n" else src.label
+            ToggleRow(if (on && okNow) Icons.Filled.GpsFixed else Icons.Filled.Flight, label, on, palette) {
+                ctl.toggleSource(src)
+            }
+        }
         ToggleRow(Icons.Filled.Umbrella, S.radarOverlayWeather, ctl.weatherOn, palette) { ctl.toggleWeather() }
         Spacer(Modifier.height(6.dp))
     }
@@ -1181,6 +1254,7 @@ private fun StatusPill(ctl: RadarController, palette: AbyssPalette, S: Strings) 
         ctl.offline && ctl.planes.isEmpty() -> S.radarOffline
         else -> buildString {
             append(S.radarCount(ctl.planes.size))
+            if (ctl.sourceOk.isNotEmpty()) { append(" · "); append(S.radarSourcesActive(ctl.sourceOk.size, ctl.sources.size)) }
             if (ctl.lastOk > 0) { append(" · "); append(S.radarUpdatedAgo(((now - ctl.lastOk) / 1000).toInt().coerceAtLeast(0))) }
             if (ctl.tooWide) { append(" · "); append(S.radarZoomIn) }
             if (ctl.locationDenied) { append(" · "); append(S.radarLocationDenied) }
@@ -1239,7 +1313,7 @@ private fun SearchResults(list: List<Plane>, searching: Boolean, palette: AbyssP
 @Composable
 private fun PlaneCard(
     p: Plane, route: Route?, following: Boolean, metric: Boolean,
-    photoBitmap: ImageBitmap?, photo: PlanePhoto?,
+    photoBitmap: ImageBitmap?, photo: PlanePhoto?, info: AircraftInfo?, flight: FlightInfo?,
     palette: AbyssPalette, S: Strings, onOpenPhoto: () -> Unit, onFollow: () -> Unit, onClose: () -> Unit,
 ) {
     // Re-evaluated every second so the live position / progress move.
@@ -1278,7 +1352,8 @@ private fun PlaneCard(
                         Tag(S.radarMilitaryTag, Color(0xFF8FBF6A), palette)
                     }
                 }
-                val sub = listOfNotNull(p.operator, p.desc ?: p.type).joinToString(" · ")
+                val model = listOfNotNull(info?.manufacturer, info?.type).joinToString(" ").takeIf { it.isNotBlank() }
+                val sub = listOfNotNull(flight?.airline ?: p.operator, model ?: p.desc ?: p.type).joinToString(" · ")
                 if (sub.isNotEmpty()) Text(sub, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 13.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -1352,6 +1427,20 @@ private fun PlaneCard(
                     }
                 }
             }
+        }
+
+        // Registry + provenance
+        val owner = info?.owner
+        val country = info?.ownerCountry ?: p.country
+        if (owner != null || country != null) {
+            Spacer(Modifier.height(6.dp))
+            Text("${S.radarOwner}: " + listOfNotNull(owner, country).joinToString(" · "),
+                color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (p.sources.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text("${S.radarSeenBy}: " + p.sources.sorted().joinToString(" · "),
+                color = palette.onSurface.copy(alpha = 0.45f), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
 
         // Follow

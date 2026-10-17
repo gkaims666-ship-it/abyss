@@ -359,4 +359,10 @@ object StringsRu : Strings() {
 
     // ---- radar: day/night terminator
     override val radarOverlayTerminator = "День / ночь"
+
+    // ---- radar: data sources
+    override val radarSources = "Источники данных"
+    override fun radarSourcesActive(ok: Int, total: Int) = "Источники: $ok/$total"
+    override val radarSeenBy = "Видят"
+    override val radarOwner = "Владелец"
 }

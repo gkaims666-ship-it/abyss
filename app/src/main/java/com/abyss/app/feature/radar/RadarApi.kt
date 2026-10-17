@@ -2,124 +2,226 @@ package com.abyss.app.feature.radar
 
 import com.abyss.app.core.net.Http
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.Locale
 import java.util.concurrent.TimeUnit
-import kotlin.math.asin
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
+import kotlin.math.roundToInt
 
 /**
- * Live aircraft from the open ADS-B network (community receivers, no API key):
- * primary adsb.lol, fallback airplanes.live — both serve the same readsb "v2"
- * JSON. Routes (origin → destination) come from adsb.lol's route set.
+ * Live aircraft from several independent, open ADS-B networks queried in
+ * parallel and merged per aircraft (see [mergeAll]). Each network has its own
+ * receivers (and MLAT coverage), so together they see far more than any one.
+ *  - adsb.lol, airplanes.live, adsb.fi — community readsb networks ("v2" JSON);
+ *  - OpenSky Network — research network (anonymous quota, so polled sparingly).
+ * Registry details and backup routes come from adsbdb; primary routes from
+ * adsb.lol's route set. All key-free.
  */
 
-/** One aircraft as last reported. Units as broadcast: feet, knots, ft/min, degrees. */
-data class Plane(
-    val hex: String,
-    val callsign: String?,
-    val reg: String?,
-    val type: String?,
-    val desc: String?,
-    val operator: String?,
-    val lat: Double,
-    val lon: Double,
-    val altFt: Int?,
-    val onGround: Boolean,
-    val gsKt: Double?,
-    val track: Double?,
-    val vrateFpm: Int?,
-    val squawk: String?,
-    val emergency: String?,
-    val military: Boolean,
-    val category: String?,
-    /** Seconds since the position was received, at fetch time. */
-    val seenPos: Double,
-    /** System.currentTimeMillis() when fetched. */
-    val fetchedAt: Long,
-) {
-    /** 7500 hijack, 7600 radio failure, 7700 general emergency, or a declared emergency. */
-    val isEmergency: Boolean
-        get() = squawk == "7500" || squawk == "7600" || squawk == "7700" ||
-            (emergency != null && emergency != "none")
-
-    /**
-     * Dead-reckoned position now: moves along the track at ground speed since
-     * the last fix (capped at 45 s), so planes glide smoothly between updates.
-     */
-    fun positionAt(nowMs: Long, out: DoubleArray) {
-        out[0] = lat; out[1] = lon
-        val gs = gsKt ?: return
-        val tr = track ?: return
-        if (onGround && gs < 40.0) return
-        val dt = ((nowMs - fetchedAt) / 1000.0 + seenPos).coerceIn(0.0, 45.0)
-        val distNm = gs * dt / 3600.0
-        destination(lat, lon, tr, distNm, out)
-    }
+/** A live-position network. */
+enum class RadarSource(val id: String, val label: String) {
+    AdsbLol("adsblol", "adsb.lol"),
+    AirplanesLive("airplaneslive", "airplanes.live"),
+    AdsbFi("adsbfi", "adsb.fi"),
+    OpenSky("opensky", "OpenSky Network"),
 }
 
-data class Airport(val icao: String?, val iata: String?, val name: String?, val city: String?, val lat: Double, val lon: Double)
+/** One merged fetch: the aircraft plus which networks answered. */
+data class RadarSnapshot(
+    val planes: List<Plane>,
+    val ok: Set<RadarSource>,
+    val failed: Set<RadarSource>,
+    val perSource: Map<RadarSource, Int>,
+)
 
-data class Route(val origin: Airport?, val destination: Airport?, val codes: String?)
+/** Registry details for an airframe (adsbdb). */
+data class AircraftInfo(
+    val type: String?,
+    val icaoType: String?,
+    val manufacturer: String?,
+    val registration: String?,
+    val owner: String?,
+    val ownerCountry: String?,
+    val photoThumb: String?,
+    val photo: String?,
+)
+
+/** Airline + route for a callsign (adsbdb). */
+data class FlightInfo(val airline: String?, val airlineIata: String?, val route: Route?)
 
 class RadarException(message: String) : Exception(message)
 
 object RadarApi {
-    private val bases = listOf("https://api.adsb.lol", "https://api.airplanes.live")
     private val client: OkHttpClient = Http.client.newBuilder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
     private const val UA = "Abyss/1.0 (Android; com.abyss.app)"
 
-    /** Aircraft within [radiusNm] (max 250) of a point. */
-    suspend fun around(lat: Double, lon: Double, radiusNm: Int): List<Plane> =
-        v2("/v2/point/%.4f/%.4f/%d".format(java.util.Locale.US, lat, lon, radiusNm.coerceIn(1, 250)))
-
-    suspend fun byCallsign(cs: String) = v2("/v2/callsign/" + enc(cs.trim().uppercase()))
-    suspend fun byReg(reg: String) = v2("/v2/reg/" + enc(reg.trim().uppercase()))
-    suspend fun byHex(hex: String) = v2("/v2/hex/" + enc(hex.trim().lowercase()))
-    suspend fun military() = v2("/v2/mil")
-    suspend fun bySquawk(sq: String) = v2("/v2/sqk/" + enc(sq.trim()))
+    // ------------------------------------------------------------ politeness
 
     /**
-     * Global search: tries the query as a callsign, a registration and a hex
-     * code; returns everything found (deduplicated).
+     * Minimum spacing between requests to one host. adsb.fi temporarily bans
+     * IPs that exceed 1 req/s; airplanes.live asks for the same.
      */
-    suspend fun search(q: String): List<Plane> {
-        val t = q.trim()
-        if (t.length < 2) return emptyList()
-        val out = LinkedHashMap<String, Plane>()
-        runCatching { byCallsign(t) }.getOrNull()?.forEach { out[it.hex] = it }
-        runCatching { byReg(t) }.getOrNull()?.forEach { out[it.hex] = it }
-        if (t.length == 6 && t.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
-            runCatching { byHex(t) }.getOrNull()?.forEach { out[it.hex] = it }
+    private val minGapMs = mapOf(
+        "opendata.adsb.fi" to 1100L,
+        "api.airplanes.live" to 1050L,
+        "api.adsb.lol" to 250L,
+        "opensky-network.org" to 1000L,
+        "api.adsbdb.com" to 300L,
+    )
+    private val gates = HashMap<String, Mutex>()
+    private val lastAt = HashMap<String, Long>()
+
+    private suspend fun <T> gated(host: String, block: suspend () -> T): T {
+        val m = synchronized(gates) { gates.getOrPut(host) { Mutex() } }
+        return m.withLock {
+            val gap = minGapMs[host] ?: 0L
+            val wait = (synchronized(lastAt) { lastAt[host] ?: 0L }) + gap - System.currentTimeMillis()
+            if (wait > 0) delay(wait)
+            try { block() } finally { synchronized(lastAt) { lastAt[host] = System.currentTimeMillis() } }
         }
-        if (t.length == 4 && t.all { it.isDigit() }) {
-            runCatching { bySquawk(t) }.getOrNull()?.forEach { out[it.hex] = it }
-        }
-        return out.values.toList()
     }
 
-    /** Origin/destination for a callsign (null if unknown). */
+    // ------------------------------------------------------------ area
+
+    // OpenSky's anonymous quota is 400 credits/day: poll it at most once a
+    // minute and only for areas ≤ 100 sq° (1–2 credits), reusing the result.
+    private const val OPENSKY_MIN_INTERVAL_MS = 60_000L
+    private var openskyAt = 0L
+    private var openskyCache: List<Plane> = emptyList()
+
+    /**
+     * Aircraft in the current view from every enabled network, merged.
+     * [radiusNm] (≤ 250) for the readsb networks; the bounds for OpenSky.
+     */
+    suspend fun around(
+        lat: Double, lon: Double, radiusNm: Int,
+        north: Double, south: Double, east: Double, west: Double,
+        enabled: Set<RadarSource>,
+    ): RadarSnapshot = coroutineScope {
+        val r = radiusNm.coerceIn(1, 250)
+        val ll = String.format(Locale.US, "%.4f", lat)
+        val lo = String.format(Locale.US, "%.4f", lon)
+        val jobs = enabled.map { src ->
+            async(Dispatchers.IO) {
+                src to runCatching {
+                    when (src) {
+                        RadarSource.AdsbLol -> readsb(src, "https://api.adsb.lol/v2/point/$ll/$lo/$r")
+                        RadarSource.AirplanesLive -> readsb(src, "https://api.airplanes.live/v2/point/$ll/$lo/$r")
+                        RadarSource.AdsbFi -> readsb(src, "https://opendata.adsb.fi/api/v3/lat/$ll/lon/$lo/dist/$r")
+                        RadarSource.OpenSky -> openSky(north, south, east, west)
+                    }
+                }
+            }
+        }
+        val results = jobs.awaitAll()
+        val ok = results.filter { it.second.isSuccess }.map { it.first }.toSet()
+        val failed = results.filter { it.second.isFailure }.map { it.first }.toSet()
+        val lists = results.mapNotNull { it.second.getOrNull() }
+        val per = results.associate { (s, res) -> s to (res.getOrNull()?.size ?: 0) }
+        if (ok.isEmpty() && failed.isNotEmpty()) throw RadarException("all sources failed")
+        RadarSnapshot(mergeAll(lists, System.currentTimeMillis()), ok, failed, per)
+    }
+
+    private suspend fun openSky(north: Double, south: Double, east: Double, west: Double): List<Plane> {
+        val area = (north - south) * (if (east >= west) east - west else 360 - (west - east))
+        val now = System.currentTimeMillis()
+        if (area > 100.0 || now - openskyAt < OPENSKY_MIN_INTERVAL_MS) {
+            // Outside budget: reuse the last batch (only planes still inside the view).
+            return openskyCache.filter { it.lat in south..north && inLon(it.lon, west, east) }
+        }
+        val url = "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f"
+            .format(Locale.US, south, west, north, east)
+        val text = gated("opensky-network.org") { fetch(url) } ?: throw RadarException("opensky")
+        val planes = parseOpenSky(text)
+        openskyAt = now
+        openskyCache = planes
+        return planes
+    }
+
+    private fun inLon(lon: Double, west: Double, east: Double) =
+        if (west <= east) lon in west..east else (lon >= west || lon <= east)
+
+    // ------------------------------------------------------------ lookups
+
+    private enum class Query { Callsign, Reg, Hex, Mil, Squawk }
+
+    private fun queryUrl(src: RadarSource, q: Query, arg: String): String? {
+        val a = enc(arg)
+        return when (src) {
+            RadarSource.AdsbLol -> "https://api.adsb.lol" + when (q) {
+                Query.Callsign -> "/v2/callsign/$a"; Query.Reg -> "/v2/reg/$a"; Query.Hex -> "/v2/hex/$a"
+                Query.Mil -> "/v2/mil"; Query.Squawk -> "/v2/sqk/$a"
+            }
+            RadarSource.AirplanesLive -> "https://api.airplanes.live" + when (q) {
+                Query.Callsign -> "/v2/callsign/$a"; Query.Reg -> "/v2/reg/$a"; Query.Hex -> "/v2/hex/$a"
+                Query.Mil -> "/v2/mil"; Query.Squawk -> "/v2/squawk/$a"
+            }
+            RadarSource.AdsbFi -> "https://opendata.adsb.fi/api" + when (q) {
+                Query.Callsign -> "/v2/callsign/$a"; Query.Reg -> "/v2/registration/$a"; Query.Hex -> "/v2/hex/$a"
+                Query.Mil -> "/v2/mil"; Query.Squawk -> "/v2/sqk/$a"
+            }
+            RadarSource.OpenSky -> null   // no lookup endpoints in the anonymous API
+        }
+    }
+
+    /** Runs a lookup on every enabled readsb network in parallel and merges. */
+    private suspend fun lookup(q: Query, arg: String, enabled: Set<RadarSource>): List<Plane> = coroutineScope {
+        val jobs = enabled.mapNotNull { src ->
+            val url = queryUrl(src, q, arg) ?: return@mapNotNull null
+            async(Dispatchers.IO) { runCatching { readsb(src, url) }.getOrNull() }
+        }
+        mergeAll(jobs.awaitAll().filterNotNull(), System.currentTimeMillis())
+    }
+
+    private val readsbAll = setOf(RadarSource.AdsbLol, RadarSource.AirplanesLive, RadarSource.AdsbFi)
+
+    suspend fun byCallsign(cs: String, en: Set<RadarSource> = readsbAll) = lookup(Query.Callsign, cs.trim().uppercase(), en)
+    suspend fun byReg(reg: String, en: Set<RadarSource> = readsbAll) = lookup(Query.Reg, reg.trim().uppercase(), en)
+    suspend fun byHex(hex: String, en: Set<RadarSource> = readsbAll) = lookup(Query.Hex, hex.trim().lowercase(), en)
+    suspend fun military(en: Set<RadarSource> = readsbAll) = lookup(Query.Mil, "", en)
+    suspend fun bySquawk(sq: String, en: Set<RadarSource> = readsbAll) = lookup(Query.Squawk, sq.trim(), en)
+
+    /** Global search: callsign + registration (+ hex / squawk when it looks like one), merged. */
+    suspend fun search(q: String, en: Set<RadarSource> = readsbAll): List<Plane> {
+        val t = q.trim()
+        if (t.length < 2) return emptyList()
+        val lists = ArrayList<List<Plane>>()
+        lists += runCatching { byCallsign(t, en) }.getOrDefault(emptyList())
+        lists += runCatching { byReg(t, en) }.getOrDefault(emptyList())
+        if (t.length == 6 && t.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
+            lists += runCatching { byHex(t, en) }.getOrDefault(emptyList())
+        }
+        if (t.length == 4 && t.all { it.isDigit() }) {
+            lists += runCatching { bySquawk(t, en) }.getOrDefault(emptyList())
+        }
+        return mergeAll(lists, System.currentTimeMillis())
+    }
+
+    /** Origin/destination for a callsign from adsb.lol's route set (null if unknown). */
     suspend fun route(callsign: String, lat: Double, lon: Double): Route? = withContext(Dispatchers.IO) {
         val body = buildJsonObject {
             put("planes", buildJsonArray {
@@ -136,36 +238,61 @@ object RadarApi {
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
         val text = runCatching {
-            client.newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.string() else null }
+            gated("api.adsb.lol") { client.newCall(req).execute().use { r -> if (r.isSuccessful) r.body?.string() else null } }
         }.getOrNull() ?: return@withContext null
         parseRoute(text)
     }
 
-    // ---------------------------------------------------------------- internals
+    /**
+     * Registry details (+ airline and route when [callsign] is given) from
+     * adsbdb. Either half may be null.
+     */
+    suspend fun adsbdb(hex: String, callsign: String?): Pair<AircraftInfo?, FlightInfo?> = withContext(Dispatchers.IO) {
+        val cs = callsign?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
+        val url = "https://api.adsbdb.com/v0/aircraft/" + enc(hex.lowercase()) + (if (cs != null) "?callsign=" + enc(cs) else "")
+        val text = gated("api.adsbdb.com") { fetch(url) }
+        var aircraft: AircraftInfo? = null
+        var flight: FlightInfo? = null
+        val resp = text?.let { runCatching { Http.json.parseToJsonElement(it).jsonObject["response"] as? JsonObject }.getOrNull() }
+        if (resp != null) {
+            aircraft = (resp["aircraft"] as? JsonObject)?.let(::parseAircraft)
+            flight = (resp["flightroute"] as? JsonObject)?.let(::parseFlight)
+        }
+        // Unknown airframe (404) but a callsign: the route can still be known.
+        if (flight == null && cs != null) {
+            val t2 = gated("api.adsbdb.com") { fetch("https://api.adsbdb.com/v0/callsign/" + enc(cs)) }
+            val r2 = t2?.let { runCatching { Http.json.parseToJsonElement(it).jsonObject["response"] as? JsonObject }.getOrNull() }
+            flight = (r2?.get("flightroute") as? JsonObject)?.let(::parseFlight)
+        }
+        aircraft to flight
+    }
+
+    // ------------------------------------------------------------ internals
 
     private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
 
-    private suspend fun v2(path: String): List<Plane> = withContext(Dispatchers.IO) {
-        var last: Exception? = null
-        for (base in bases) {
-            try {
-                val req = Request.Builder().url(base + path).header("User-Agent", UA).build()
-                client.newCall(req).execute().use { r ->
-                    if (!r.isSuccessful) throw RadarException("HTTP ${r.code}")
-                    val text = r.body?.string() ?: throw RadarException("empty")
-                    return@withContext parsePlanes(text)
-                }
-            } catch (e: Exception) {
-                last = e
+    private fun fetch(url: String): String? = runCatching {
+        client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+            if (r.isSuccessful) r.body?.string() else null
+        }
+    }.getOrNull()
+
+    private suspend fun readsb(src: RadarSource, url: String): List<Plane> {
+        val host = url.substringAfter("://").substringBefore('/')
+        val text = gated(host) {
+            client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+                if (!r.isSuccessful) throw RadarException("HTTP ${r.code}")
+                r.body?.string() ?: throw RadarException("empty")
             }
         }
-        throw last ?: RadarException("unreachable")
+        return parseReadsb(text, src.label)
     }
 
-    private fun parsePlanes(text: String): List<Plane> {
+    private fun parseReadsb(text: String, label: String): List<Plane> {
         val root = Http.json.parseToJsonElement(text).jsonObject
         val ac = (root["ac"] ?: root["aircraft"]) as? JsonArray ?: return emptyList()
         val now = System.currentTimeMillis()
+        val src = setOf(label)
         val out = ArrayList<Plane>(ac.size)
         for (el in ac) {
             val o = el as? JsonObject ?: continue
@@ -182,7 +309,7 @@ object RadarApi {
             val alt = if (ground) 0 else (altRaw as? JsonPrimitive)?.intOrNull ?: o.i("alt_geom")
             val db = o.i("dbFlags") ?: 0
             out += Plane(
-                hex = o.s("hex")?.trim()?.lowercase() ?: continue,
+                hex = o.s("hex")?.trim()?.lowercase()?.removePrefix("~") ?: continue,
                 callsign = o.s("flight")?.trim()?.takeIf { it.isNotEmpty() },
                 reg = o.s("r")?.trim()?.takeIf { it.isNotEmpty() },
                 type = o.s("t")?.trim()?.takeIf { it.isNotEmpty() },
@@ -200,6 +327,51 @@ object RadarApi {
                 category = o.s("category"),
                 seenPos = o.d("seen_pos") ?: o.d("seen") ?: 0.0,
                 fetchedAt = now,
+                sources = src,
+            )
+        }
+        return out
+    }
+
+    /** OpenSky state vectors → Plane (metres → feet, m/s → knots / ft-per-min). */
+    private fun parseOpenSky(text: String): List<Plane> {
+        val root = Http.json.parseToJsonElement(text).jsonObject
+        val states = root["states"] as? JsonArray ?: return emptyList()
+        val serverTime = (root["time"] as? JsonPrimitive)?.doubleOrNull
+        val now = System.currentTimeMillis()
+        val src = setOf(RadarSource.OpenSky.label)
+        val out = ArrayList<Plane>(states.size)
+        for (el in states) {
+            val a = el as? JsonArray ?: continue
+            fun at(i: Int) = a.getOrNull(i) as? JsonPrimitive
+            val hex = at(0)?.contentOrNull?.trim()?.lowercase() ?: continue
+            val lon = at(5)?.doubleOrNull ?: continue
+            val lat = at(6)?.doubleOrNull ?: continue
+            val baroM = at(7)?.doubleOrNull
+            val ground = at(8)?.booleanOrNull ?: false
+            val vel = at(9)?.doubleOrNull
+            val vr = at(11)?.doubleOrNull
+            val geoM = at(13)?.doubleOrNull
+            val tPos = at(3)?.doubleOrNull
+            val age = if (serverTime != null && tPos != null) (serverTime - tPos).coerceAtLeast(0.0) else 0.0
+            out += Plane(
+                hex = hex,
+                callsign = at(1)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
+                reg = null, type = null, desc = null, operator = null,
+                lat = lat, lon = lon,
+                altFt = if (ground) 0 else (baroM ?: geoM)?.let { (it * 3.28084).roundToInt() },
+                onGround = ground,
+                gsKt = vel?.let { it * 1.943844 },
+                track = at(10)?.doubleOrNull,
+                vrateFpm = vr?.let { (it * 196.8504).roundToInt() },
+                squawk = at(14)?.contentOrNull,
+                emergency = null,
+                military = false,
+                category = null,
+                seenPos = age,
+                fetchedAt = now,
+                sources = src,
+                country = at(2)?.contentOrNull,
             )
         }
         return out
@@ -224,47 +396,31 @@ object RadarApi {
         return Route(airports.firstOrNull(), airports.lastOrNull()?.takeIf { airports.size > 1 }, codes)
     }
 
+    private fun parseAircraft(o: JsonObject) = AircraftInfo(
+        type = o.s("type"), icaoType = o.s("icao_type"), manufacturer = o.s("manufacturer"),
+        registration = o.s("registration"), owner = o.s("registered_owner"),
+        ownerCountry = o.s("registered_owner_country_name"),
+        photoThumb = o.s("url_photo_thumbnail"), photo = o.s("url_photo"),
+    )
+
+    private fun parseFlight(o: JsonObject): FlightInfo {
+        fun ap(x: JsonElement?): Airport? {
+            val a = x as? JsonObject ?: return null
+            val la = a.d("latitude") ?: return null
+            val lo = a.d("longitude") ?: return null
+            return Airport(a.s("icao_code"), a.s("iata_code"), a.s("name"), a.s("municipality"), la, lo)
+        }
+        val airline = o["airline"] as? JsonObject
+        val origin = ap(o["origin"])
+        val dest = ap(o["destination"])
+        val route = if (origin != null || dest != null)
+            Route(origin, dest, listOfNotNull(origin?.iata ?: origin?.icao, dest?.iata ?: dest?.icao).joinToString("-"))
+        else null
+        return FlightInfo(airline?.s("name"), airline?.s("iata"), route)
+    }
+
     private fun JsonObject.s(k: String): String? = (this[k] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject.d(k: String): Double? = (this[k] as? JsonPrimitive)?.doubleOrNull
     private fun JsonObject.i(k: String): Int? =
         (this[k] as? JsonPrimitive)?.let { it.intOrNull ?: it.doubleOrNull?.toInt() }
-}
-
-// ---------------------------------------------------------------- geodesy
-
-private const val EARTH_NM = 3440.065
-
-/** Point reached from (lat, lon) after [distNm] on initial bearing [brgDeg]; written to out[0..1]. */
-fun destination(lat: Double, lon: Double, brgDeg: Double, distNm: Double, out: DoubleArray) {
-    val d = distNm / EARTH_NM
-    val b = Math.toRadians(brgDeg)
-    val p1 = Math.toRadians(lat)
-    val l1 = Math.toRadians(lon)
-    val p2 = asin(sin(p1) * cos(d) + cos(p1) * sin(d) * cos(b))
-    val l2 = l1 + atan2(sin(b) * sin(d) * cos(p1), cos(d) - sin(p1) * sin(p2))
-    out[0] = Math.toDegrees(p2)
-    out[1] = (Math.toDegrees(l2) + 540.0) % 360.0 - 180.0
-}
-
-/** Great-circle distance in nautical miles. */
-fun distanceNm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val p1 = Math.toRadians(lat1); val p2 = Math.toRadians(lat2)
-    val dp = p2 - p1; val dl = Math.toRadians(lon2 - lon1)
-    val a = sin(dp / 2) * sin(dp / 2) + cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
-    return 2 * EARTH_NM * atan2(sqrt(a), sqrt(1 - a))
-}
-
-/** Point at fraction [f] along the great circle between two points; written to out[0..1]. */
-fun interpolate(lat1: Double, lon1: Double, lat2: Double, lon2: Double, f: Double, out: DoubleArray) {
-    val p1 = Math.toRadians(lat1); val l1 = Math.toRadians(lon1)
-    val p2 = Math.toRadians(lat2); val l2 = Math.toRadians(lon2)
-    val d = distanceNm(lat1, lon1, lat2, lon2) / EARTH_NM
-    if (d < 1e-9) { out[0] = lat1; out[1] = lon1; return }
-    val a = sin((1 - f) * d) / sin(d)
-    val b = sin(f * d) / sin(d)
-    val x = a * cos(p1) * cos(l1) + b * cos(p2) * cos(l2)
-    val y = a * cos(p1) * sin(l1) + b * cos(p2) * sin(l2)
-    val z = a * sin(p1) + b * sin(p2)
-    out[0] = Math.toDegrees(atan2(z, sqrt(x * x + y * y)))
-    out[1] = Math.toDegrees(atan2(y, x))
 }

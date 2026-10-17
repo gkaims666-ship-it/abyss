@@ -359,4 +359,10 @@ object StringsZh : Strings() {
 
     // ---- radar: day/night terminator
     override val radarOverlayTerminator = "昼夜"
+
+    // ---- radar: data sources
+    override val radarSources = "数据来源"
+    override fun radarSourcesActive(ok: Int, total: Int) = "来源：$ok/$total"
+    override val radarSeenBy = "接收方"
+    override val radarOwner = "所有者"
 }
