@@ -1,0 +1,128 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="770" height="320" viewBox="0 0 770 320">
+<rect width="770" height="320" fill="#101014"/>
+<g transform="translate(10 10)">
+<rect width="142" height="52" rx="10" fill="#0A0F1C" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#7AA2F7"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Abyss</text>
+</g>
+<g transform="translate(160 10)">
+<rect width="142" height="52" rx="10" fill="#1F1E1D" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#D97757"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Ember</text>
+</g>
+<g transform="translate(310 10)">
+<rect width="142" height="52" rx="10" fill="#FAF9F5" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#C96442"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#111">Ivory</text>
+</g>
+<g transform="translate(460 10)">
+<rect width="142" height="52" rx="10" fill="#1A0E12" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#E5484D"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Crimson</text>
+</g>
+<g transform="translate(610 10)">
+<rect width="142" height="52" rx="10" fill="#1E1E2E" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#CBA6F7"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Catppuccin Mocha</text>
+</g>
+<g transform="translate(10 70)">
+<rect width="142" height="52" rx="10" fill="#1A1B26" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#7AA2F7"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Tokyo Night</text>
+</g>
+<g transform="translate(160 70)">
+<rect width="142" height="52" rx="10" fill="#2E3440" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#88C0D0"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Nord</text>
+</g>
+<g transform="translate(310 70)">
+<rect width="142" height="52" rx="10" fill="#191724" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#EBBCBA"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Rosé Pine</text>
+</g>
+<g transform="translate(460 70)">
+<rect width="142" height="52" rx="10" fill="#282828" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#FABD2F"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Gruvbox</text>
+</g>
+<g transform="translate(610 70)">
+<rect width="142" height="52" rx="10" fill="#F4F6FB" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#1E6FFF"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#111">Daylight</text>
+</g>
+<g transform="translate(10 130)">
+<rect width="142" height="52" rx="10" fill="#282A36" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#BD93F9"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Dracula</text>
+</g>
+<g transform="translate(160 130)">
+<rect width="142" height="52" rx="10" fill="#2B3339" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#A7C080"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Everforest</text>
+</g>
+<g transform="translate(310 130)">
+<rect width="142" height="52" rx="10" fill="#1F1F28" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#7E9CD8"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Kanagawa</text>
+</g>
+<g transform="translate(460 130)">
+<rect width="142" height="52" rx="10" fill="#002B36" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#268BD2"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Solarized Dark</text>
+</g>
+<g transform="translate(610 130)">
+<rect width="142" height="52" rx="10" fill="#24273A" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#8AADF4"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Catppuccin Macchiato</text>
+</g>
+<g transform="translate(10 190)">
+<rect width="142" height="52" rx="10" fill="#EFF1F5" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#1E66F5"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#111">Catppuccin Latte</text>
+</g>
+<g transform="translate(160 190)">
+<rect width="142" height="52" rx="10" fill="#282C34" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#61AFEF"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">One Dark</text>
+</g>
+<g transform="translate(310 190)">
+<rect width="142" height="52" rx="10" fill="#2D2A2E" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#FF6188"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Monokai Pro</text>
+</g>
+<g transform="translate(460 190)">
+<rect width="142" height="52" rx="10" fill="#FBF1C7" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#AF3A03"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#111">Gruvbox Light</text>
+</g>
+<g transform="translate(610 190)">
+<rect width="142" height="52" rx="10" fill="#161616" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#78A9FF"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Carbonfox</text>
+</g>
+<g transform="translate(10 250)">
+<rect width="142" height="52" rx="10" fill="#0F111A" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#82AAFF"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Oceanic</text>
+</g>
+<g transform="translate(160 250)">
+<rect width="142" height="52" rx="10" fill="#0B0E14" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#FFB454"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Ayu Dark</text>
+</g>
+<g transform="translate(310 250)">
+<rect width="142" height="52" rx="10" fill="#1F2430" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#FFCC66"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Ayu Mirage</text>
+</g>
+<g transform="translate(460 250)">
+<rect width="142" height="52" rx="10" fill="#24283B" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#7AA2F7"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Tokyo Night Storm</text>
+</g>
+<g transform="translate(610 250)">
+<rect width="142" height="52" rx="10" fill="#232136" stroke="#2a2a30"/>
+<circle cx="22" cy="26" r="11" fill="#EA9A97"/>
+<text x="42" y="30" font-family="sans-serif" font-size="11" fill="#EDEDED">Rosé Pine Moon</text>
+</g>
+</svg>

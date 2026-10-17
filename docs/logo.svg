@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Abyss">
+  <defs>
+    <radialGradient id="disk" cx="50%" cy="50%" r="50%">
+      <stop offset="34%" stop-color="#1F1E1D"/>
+      <stop offset="52%" stop-color="#D97757"/>
+      <stop offset="70%" stop-color="#E3A587"/>
+      <stop offset="100%" stop-color="#1F1E1D" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="50%" cy="50%" r="50%">
+      <stop offset="60%" stop-color="#000000"/>
+      <stop offset="100%" stop-color="#0b0b0c"/>
+    </radialGradient>
+  </defs>
+  <rect width="160" height="160" rx="36" fill="#1F1E1D"/>
+  <g transform="translate(80 80)">
+    <ellipse rx="62" ry="20" fill="url(#disk)" transform="rotate(-24)"/>
+    <ellipse rx="62" ry="20" fill="none" stroke="#F0C3AE" stroke-opacity="0.5" stroke-width="1.5" transform="rotate(-24)"/>
+    <circle r="30" fill="url(#core)"/>
+    <circle r="30" fill="none" stroke="#D97757" stroke-width="2.5"/>
+    <circle r="30" fill="none" stroke="#FAF9F5" stroke-opacity="0.25" stroke-width="1"/>
+  </g>
+</svg>

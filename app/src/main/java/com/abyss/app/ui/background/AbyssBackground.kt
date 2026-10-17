@@ -131,6 +131,14 @@ class AbyssBackgroundState {
     internal var viewW = 0f
     internal var viewH = 0f
 
+    /**
+     * True while a tab is sliding. The living background then holds its last
+     * frame (no sim step, no redraw, no obstacle churn), so the whole frame
+     * budget goes to the transition — the difference between a janky switch and
+     * a clean 120 Hz one.
+     */
+    @Volatile internal var transitioning = false
+
     // Device tilt parallax (smoothed in the frame loop).
     internal var tiltX = 0f
     internal var tiltY = 0f
@@ -279,6 +287,9 @@ fun Modifier.abyssObstacle(corner: Dp = 0.dp): Modifier = composed {
             onDispose { st.removeObstacle(key) }
         }
         Modifier.onGloballyPositioned { c ->
+            // Elements slide every frame during a tab switch; don't thrash the
+            // obstacle map then — keep the last bounds until the slide settles.
+            if (st.transitioning) return@onGloballyPositioned
             if (!c.isAttached) { st.removeObstacle(key); return@onGloballyPositioned }
             val b = c.boundsInRoot()
             if (b.width < 1f || b.height < 1f) { known[0] = false; st.removeObstacle(key); return@onGloballyPositioned }
@@ -469,6 +480,9 @@ fun AbyssAnimatedBackground(
             while (true) {
                 withFrameNanos { now ->
                     if (state.startNanos == 0L) state.startNanos = now
+                    // Hold still during tab slides: no sim, no redraw, all the
+                    // frame budget goes to the transition.
+                    if (state.transitioning) { clock[0] = now; return@withFrameNanos }
                     val last = clock[0]
                     val dt = if (last == 0L) 0f else ((now - last) / 1_000_000_000f).coerceAtMost(0.05f)
                     clock[0] = now
@@ -1027,24 +1041,24 @@ half4 main(float2 p) {
     float k = dark > 0.5 ? 1.0 : 0.62;
     float3 col = mix(uBg, mix(uAccent, uAccent2, 0.5 + 0.5 * fl), band * (0.05 + 0.07 * top) * k);
 
-    // ---- luminescent surface
-    float3 n = normalize(float3(-g * 3.2, 1.0));
-    float spec = pow(max(dot(n, float3(-0.32, -0.52, 0.79)), 0.0), 26.0);
-    float crest = smoothstep(0.012, 0.36, h);
+    // ---- luminescent surface (deeper relief + brighter emission = volume)
+    float3 n = normalize(float3(-g * 4.2, 1.0));
+    float spec = pow(max(dot(n, float3(-0.32, -0.52, 0.79)), 0.0), 24.0);
+    float crest = smoothstep(0.010, 0.34, h);
     float trough = smoothstep(0.015, 0.40, -h);
-    float front = smoothstep(0.008, 0.12, slope);
-    float energy = clamp(abs(h) * 2.2 + slope * 3.2, 0.0, 1.0);
+    float front = smoothstep(0.007, 0.11, slope);
+    float energy = clamp(abs(h) * 2.4 + slope * 3.6, 0.0, 1.0);
     float glint = 0.5 + 0.5 * sin(p.x * 0.045 + p.y * 0.03 + uTime * 2.4 + h * 6.0);
     float grain = 0.5 + 0.5 * sin(p.x * 0.31 + sin(p.y * 0.27 + uTime * 3.1) * 2.0 + uTime * 5.0);
-    float foam = smoothstep(0.40, 0.92, h) * (0.55 + 0.45 * grain);
+    float foam = smoothstep(0.38, 0.90, h) * (0.55 + 0.45 * grain);
     // Soft bloom: energy a couple of cells around, so bright fronts halo like phosphorescence.
     float wide = (energyAt(c + float2(2.3, 0.0)) + energyAt(c - float2(2.3, 0.0)) +
                   energyAt(c + float2(0.0, 2.3)) + energyAt(c - float2(0.0, 2.3))) * 0.25;
 
     float3 lit = mix(uAccent, uAccent2, clamp(0.5 + h * 0.9, 0.0, 1.0));
-    float3 glowC = lit * 1.2 + float3(0.06);
-    float emis = crest * 0.30 + front * 0.26 * (0.6 + 0.4 * glint) + spec * 0.65 * energy
-               + foam * 0.50 + wide * 0.20;
+    float3 glowC = lit * 1.32 + float3(0.07);
+    float emis = crest * 0.46 + front * 0.36 * (0.6 + 0.4 * glint) + spec * 0.92 * energy
+               + foam * 0.70 + wide * 0.30;
     // Nothing glows inside a solid element; water slipping under one runs dim.
     emis *= (1.0 - solidIn) * (1.0 - 0.55 * underIn);
 
@@ -1058,9 +1072,9 @@ half4 main(float2 p) {
     }
 
     if (dark > 0.5) {
-        col += glowC * emis * 0.95;
+        col += glowC * emis * 1.28;
     } else {
-        col = mix(col, lit, clamp(emis * 0.75, 0.0, 0.8));
+        col = mix(col, lit, clamp(emis * 0.9, 0.0, 0.85));
     }
     col = mix(col, uBg * 0.6, (trough * 0.12 + underIn * 0.10) * k);
     col = min(col, float3(1.0));
@@ -1100,14 +1114,14 @@ half4 main(float2 p) {
     float h = dec(f.r);
     float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
     float slope = length(g);
-    float3 n = normalize(float3(-g * 3.2, 1.0));
-    float spec = pow(max(dot(n, float3(-0.32, -0.52, 0.79)), 0.0), 22.0);
-    float crest = smoothstep(0.02, 0.42, h);
-    float front = smoothstep(0.012, 0.14, slope);
+    float3 n = normalize(float3(-g * 4.2, 1.0));
+    float spec = pow(max(dot(n, float3(-0.32, -0.52, 0.79)), 0.0), 20.0);
+    float crest = smoothstep(0.018, 0.40, h);
+    float front = smoothstep(0.010, 0.13, slope);
     float glint = 0.5 + 0.5 * sin(p.x * 0.05 + p.y * 0.035 + uTime * 2.6 + h * 6.0);
-    float energy = clamp(abs(h) * 2.0 + slope * 3.0, 0.0, 1.0);
-    float a = crest * 0.32 + front * 0.28 * (0.6 + 0.4 * glint) + spec * 0.5 * energy;
-    a = clamp(a * (uDark > 0.5 ? 1.0 : 0.75), 0.0, 0.65);
+    float energy = clamp(abs(h) * 2.2 + slope * 3.4, 0.0, 1.0);
+    float a = crest * 0.46 + front * 0.38 * (0.6 + 0.4 * glint) + spec * 0.72 * energy;
+    a = clamp(a * (uDark > 0.5 ? 1.0 : 0.8), 0.0, 0.78);
     float3 col = mix(uAccent, uAccent2, clamp(0.5 + h * 0.9, 0.0, 1.0)) * 1.15 + float3(0.05);
     col = min(mix(col, float3(1.0), spec * 0.5), float3(1.0));
     return half4(col.r * a, col.g * a, col.b * a, a);

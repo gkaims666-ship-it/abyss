@@ -17,8 +17,11 @@ import okhttp3.RequestBody.Companion.toRequestBody
 /** Anthropic Messages API (/v1/messages). */
 class AnthropicProvider(
     override val models: List<String> = listOf(
+        "claude-sonnet-4-5",
+        "claude-opus-4-1",
         "claude-opus-4-20250514",
         "claude-sonnet-4-20250514",
+        "claude-3-7-sonnet-latest",
         "claude-3-5-haiku-20241022",
     ),
 ) : LlmProvider {

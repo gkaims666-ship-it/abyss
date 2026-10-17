@@ -172,7 +172,11 @@ private fun AbyssRoot() {
     // Tab position as a float (0 = Chat, 1 = Tools, 2 = Settings). A critically
     // damped spring: interrupt it mid-way and it simply re-aims, no jump.
     val pos = remember { Animatable(0f) }
-    LaunchedEffect(tab) { pos.animateTo(tab.ordinal.toFloat(), spring(dampingRatio = 1f, stiffness = 380f)) }
+    LaunchedEffect(tab) {
+        bg.transitioning = true
+        try { pos.animateTo(tab.ordinal.toFloat(), spring(dampingRatio = 1f, stiffness = 380f)) }
+        finally { bg.transitioning = false }
+    }
     // Tabs are composed once and kept alive. Chat now; the others shortly after
     // launch, while nothing is moving, so the first switch is already instant.
     var warm by remember { mutableStateOf(false) }
@@ -197,6 +201,10 @@ private fun AbyssRoot() {
         holeAnim.animateTo(0.5f, tween(460, easing = FastOutSlowInEasing)) { bg.holePhase = value }
         bg.powerSave = toSave
         vm.setPowerSave(toSave)
+        // Peak: a luminescent shockwave rolls out of the hole through the real
+        // wave engine — the swallow pulse on collapse, the burst on restore.
+        if (bg.holeCenter != Offset.Unspecified)
+            bg.emit(bg.holeCenter, strength = 1.5f, reach = 1.9f, sparkCount = 40)
         holeAnim.animateTo(1f, tween(540, easing = FastOutSlowInEasing)) { bg.holePhase = value }
         bg.holePhase = 0f
         bg.holeActive = false
