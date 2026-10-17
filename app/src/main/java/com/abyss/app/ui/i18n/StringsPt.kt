@@ -471,4 +471,5 @@ object StringsPt : Strings() {
     override val radarInView = "Aeronaves à vista"
     override fun radarInViewCount(n: Int) = "À vista · $n"
     override val radarMagAny = "Qualquer M"
+    override val radarCoordFormats = "Formatos de coordenadas"
 }

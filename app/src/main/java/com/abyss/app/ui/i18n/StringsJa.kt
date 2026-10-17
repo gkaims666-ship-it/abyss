@@ -471,4 +471,5 @@ object StringsJa : Strings() {
     override val radarInView = "表示中の航空機"
     override fun radarInViewCount(n: Int) = "表示中 · $n"
     override val radarMagAny = "全震度"
+    override val radarCoordFormats = "座標フォーマット"
 }

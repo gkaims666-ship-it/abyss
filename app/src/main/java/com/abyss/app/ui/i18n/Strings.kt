@@ -481,6 +481,8 @@ abstract class Strings {
 
     abstract val radarMagAny: String
 
+    abstract val radarCoordFormats: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

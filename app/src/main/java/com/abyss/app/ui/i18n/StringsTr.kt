@@ -471,4 +471,5 @@ object StringsTr : Strings() {
     override val radarInView = "Görünen uçaklar"
     override fun radarInViewCount(n: Int) = "Görünümde · $n"
     override val radarMagAny = "Her M"
+    override val radarCoordFormats = "Koordinat biçimleri"
 }

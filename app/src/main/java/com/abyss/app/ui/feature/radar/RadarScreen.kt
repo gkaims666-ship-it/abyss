@@ -75,6 +75,10 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.History
@@ -159,6 +163,7 @@ import com.abyss.app.feature.radar.RadarSource
 import com.abyss.app.feature.radar.GeoApi
 import com.abyss.app.feature.radar.MapEvent
 import com.abyss.app.feature.radar.EventFilter
+import com.abyss.app.feature.radar.GeoFormats
 import com.abyss.app.feature.radar.PlanePhoto
 import com.abyss.app.feature.radar.SunCalc
 import com.abyss.app.feature.radar.parseLatLon
@@ -1798,6 +1803,7 @@ fun RadarScreen(palette: AbyssPalette) {
                         onCopy = { clipboard.setText(AnnotatedString("%.5f, %.5f".format(java.util.Locale.US, pt[0], pt[1]))) },
                         onShare = { ctl.openUrl("https://www.openstreetmap.org/?mlat=%.5f&mlon=%.5f#map=15/%.5f/%.5f".format(java.util.Locale.US, pt[0], pt[1], pt[0], pt[1])) },
                         saved = ctl.pinSaved(), onSave = { ctl.toggleSavePin() },
+                        onCopyText = { clipboard.setText(AnnotatedString(it)) },
                         onClose = { ctl.clearPin() })
                 }
             }
@@ -2017,7 +2023,7 @@ private fun MeasureBar(totalNm: Double, metric: Boolean, palette: AbyssPalette, 
 private fun PinCard(
     pt: DoubleArray, place: Place?, loading: Boolean, me: DoubleArray?, metric: Boolean,
     palette: AbyssPalette, S: Strings, saved: Boolean, onSave: () -> Unit,
-    onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
+    onCopyText: (String) -> Unit, onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
@@ -2049,11 +2055,39 @@ private fun PinCard(
             Text(S.radarFromMe(dist(distanceNm(me[0], me[1], pt[0], pt[1]), metric, S)),
                 color = palette.onSurface.copy(alpha = 0.6f), fontSize = 13.sp)
         }
+        Spacer(Modifier.height(10.dp))
+        var showFormats by remember { androidx.compose.runtime.mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { showFormats = !showFormats }
+            .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Public, null, tint = palette.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(S.radarCoordFormats, color = palette.onSurface.copy(alpha = 0.8f), fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Icon(if (showFormats) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null,
+                tint = palette.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
+        }
+        AnimatedVisibility(showFormats) {
+            Column {
+                CoordRow("DMS", GeoFormats.dms(pt[0], pt[1]), palette, onCopyText)
+                CoordRow("UTM", GeoFormats.utm(pt[0], pt[1]).format(), palette, onCopyText)
+                CoordRow("MGRS", GeoFormats.mgrs(pt[0], pt[1]), palette, onCopyText)
+            }
+        }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PinAction(S.copy, palette, Modifier.weight(1f), onCopy)
             PinAction(S.radarShare, palette, Modifier.weight(1f), onShare)
         }
+    }
+}
+
+@Composable
+private fun CoordRow(label: String, value: String, palette: AbyssPalette, onCopy: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onCopy(value) }
+        .padding(vertical = 5.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = palette.primary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            modifier = Modifier.width(44.dp))
+        Text(value, color = palette.onSurface, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
+        Icon(Icons.Filled.ContentCopy, null, tint = palette.onSurface.copy(alpha = 0.45f), modifier = Modifier.size(14.dp))
     }
 }
 

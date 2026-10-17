@@ -471,4 +471,5 @@ object StringsUk : Strings() {
     override val radarInView = "Літаки в зоні видимості"
     override fun radarInViewCount(n: Int) = "У зоні видимості · $n"
     override val radarMagAny = "Будь-яка M"
+    override val radarCoordFormats = "Формати координат"
 }

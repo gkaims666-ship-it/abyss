@@ -471,4 +471,5 @@ object StringsZh : Strings() {
     override val radarInView = "视野内的飞机"
     override fun radarInViewCount(n: Int) = "视野内 · $n"
     override val radarMagAny = "任意震级"
+    override val radarCoordFormats = "坐标格式"
 }
