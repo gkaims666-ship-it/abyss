@@ -470,4 +470,5 @@ object StringsFr : Strings() {
     // ---- radar: aircraft in view
     override val radarInView = "Appareils visibles"
     override fun radarInViewCount(n: Int) = "En vue · $n"
+    override val radarMagAny = "Toute M"
 }

@@ -158,6 +158,7 @@ import com.abyss.app.feature.radar.RadarSnapshot
 import com.abyss.app.feature.radar.RadarSource
 import com.abyss.app.feature.radar.GeoApi
 import com.abyss.app.feature.radar.MapEvent
+import com.abyss.app.feature.radar.EventFilter
 import com.abyss.app.feature.radar.PlanePhoto
 import com.abyss.app.feature.radar.SunCalc
 import com.abyss.app.feature.radar.parseLatLon
@@ -269,6 +270,8 @@ private class RadarController(private val app: Context, private val scope: Corou
     var weatherOn by mutableStateOf(false)
     var wikiOn by mutableStateOf(false)
     var eventsOn by mutableStateOf(false)
+    var eventFilter by mutableStateOf(EventFilter())
+    private var eventsRaw: List<MapEvent> = emptyList()
     var terminatorOn by mutableStateOf(false)
     var photo by mutableStateOf<PlanePhoto?>(null)
     var photoBitmap by mutableStateOf<ImageBitmap?>(null)
@@ -411,6 +414,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         sheltersOn = prefs.getBoolean("shelters", false)
         alertsBg = prefs.getBoolean("alerts_bg", false)
         bookmarks = Bookmarks.decode(prefs.getString("bookmarks", null))
+        eventFilter = EventFilter.decode(prefs.getString("event_filter", null))
         if (alertsBg) com.abyss.app.feature.radar.AlertService.start(app)
         dark = null   // force first tile source
         applyLayer()
@@ -766,8 +770,21 @@ private class RadarController(private val app: Context, private val scope: Corou
     fun toggleEvents() {
         eventsOn = !eventsOn
         if (eventsOn) { eventsAt = 0L; dirty = true } else {
-            eventsFolder?.items?.clear(); selectedEvent = null; map?.invalidate()
+            eventsFolder?.items?.clear(); eventsRaw = emptyList(); selectedEvent = null; map?.invalidate()
         }
+    }
+
+    fun toggleEventKind(quake: Boolean) {
+        eventFilter = if (quake) eventFilter.copy(showQuakes = !eventFilter.showQuakes)
+        else eventFilter.copy(showNews = !eventFilter.showNews)
+        prefs.edit().putString("event_filter", eventFilter.encode()).apply()
+        drawEvents(); map?.invalidate()
+    }
+
+    fun cycleEventMag() {
+        eventFilter = eventFilter.copy(minMag = EventFilter.nextMag(eventFilter.minMag))
+        prefs.edit().putString("event_filter", eventFilter.encode()).apply()
+        drawEvents(); map?.invalidate()
     }
 
     private suspend fun refreshEvents(lang: String) {
@@ -776,9 +793,16 @@ private class RadarController(private val app: Context, private val scope: Corou
         val list = runCatching {
             GeoApi.events(bb.latNorth, bb.latSouth, bb.lonEast, bb.lonWest, lang)
         }.getOrNull() ?: return
+        eventsRaw = list
+        drawEvents()
+    }
+
+    /** Re-render event markers from the cached list under the current filter. */
+    fun drawEvents() {
+        val mv = map ?: return
         val folder = eventsFolder ?: return
         folder.items.clear()
-        for (e in list) {
+        for (e in eventFilter.apply(eventsRaw)) {
             val m = Marker(mv)
             m.position = GeoPoint(e.lat, e.lon)
             m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -1878,6 +1902,14 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings, 
         }
         ToggleRow(Icons.Filled.MenuBook, S.radarOverlayWiki, ctl.wikiOn, palette) { ctl.toggleWiki() }
         ToggleRow(Icons.Filled.Bolt, S.radarOverlayEvents, ctl.eventsOn, palette) { ctl.toggleEvents() }
+        if (ctl.eventsOn) {
+            Row(Modifier.padding(start = 36.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(S.radarEventQuake, ctl.eventFilter.showQuakes, palette) { ctl.toggleEventKind(true) }
+                FilterChip(S.radarEventNews, ctl.eventFilter.showNews, palette) { ctl.toggleEventKind(false) }
+                FilterChip(if (ctl.eventFilter.minMag <= 0.0) S.radarMagAny else "M${ctl.eventFilter.minMag}+",
+                    ctl.eventFilter.minMag > 0.0, palette) { ctl.cycleEventMag() }
+            }
+        }
         ToggleRow(Icons.Filled.DarkMode, S.radarOverlayTerminator, ctl.terminatorOn, palette) { ctl.toggleTerminator() }
         Spacer(Modifier.height(18.dp))
         SafetySection(ctl, palette, S, onNeedNotifPermission = onNeedNotif)
