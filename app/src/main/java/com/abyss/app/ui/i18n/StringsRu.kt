@@ -483,4 +483,5 @@ object StringsRu : Strings() {
     override val radarSolarNoon = "Солнечный полдень"
     override val radarPolarDay = "Полярный день"
     override val radarPolarNight = "Полярная ночь"
+    override val radarOpenIn = "Открыть в…"
 }

@@ -80,6 +80,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.History
@@ -166,6 +167,7 @@ import com.abyss.app.feature.radar.MapEvent
 import com.abyss.app.feature.radar.EventFilter
 import com.abyss.app.feature.radar.GeoFormats
 import com.abyss.app.feature.radar.SunMath
+import com.abyss.app.feature.radar.GeoLinks
 import com.abyss.app.feature.radar.PlanePhoto
 import com.abyss.app.feature.radar.SunCalc
 import com.abyss.app.feature.radar.parseLatLon
@@ -1806,6 +1808,7 @@ fun RadarScreen(palette: AbyssPalette) {
                         onShare = { ctl.openUrl("https://www.openstreetmap.org/?mlat=%.5f&mlon=%.5f#map=15/%.5f/%.5f".format(java.util.Locale.US, pt[0], pt[1], pt[0], pt[1])) },
                         saved = ctl.pinSaved(), onSave = { ctl.toggleSavePin() },
                         onCopyText = { clipboard.setText(AnnotatedString(it)) },
+                        onOpenUrl = { ctl.openUrl(it) },
                         onClose = { ctl.clearPin() })
                 }
             }
@@ -2025,7 +2028,7 @@ private fun MeasureBar(totalNm: Double, metric: Boolean, palette: AbyssPalette, 
 private fun PinCard(
     pt: DoubleArray, place: Place?, loading: Boolean, me: DoubleArray?, metric: Boolean,
     palette: AbyssPalette, S: Strings, saved: Boolean, onSave: () -> Unit,
-    onCopyText: (String) -> Unit, onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
+    onCopyText: (String) -> Unit, onOpenUrl: (String) -> Unit, onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
 ) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
@@ -2084,6 +2087,26 @@ private fun PinCard(
                 tint = palette.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
         }
         AnimatedVisibility(showSun) { SunBlock(pt, palette, S) }
+        var showOpen by remember { androidx.compose.runtime.mutableStateOf(false) }
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { showOpen = !showOpen }
+            .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Map, null, tint = palette.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(S.radarOpenIn, color = palette.onSurface.copy(alpha = 0.8f), fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Icon(if (showOpen) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null,
+                tint = palette.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(18.dp))
+        }
+        AnimatedVisibility(showOpen) {
+            Column {
+                for (link in GeoLinks.forPoint(pt[0], pt[1])) {
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { onOpenUrl(link.url) }
+                        .padding(vertical = 7.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(link.label, color = palette.onSurface, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        Icon(Icons.Filled.OpenInNew, null, tint = palette.primary.copy(alpha = 0.8f), modifier = Modifier.size(15.dp))
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PinAction(S.copy, palette, Modifier.weight(1f), onCopy)

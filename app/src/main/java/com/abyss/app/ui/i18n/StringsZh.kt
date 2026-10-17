@@ -483,4 +483,5 @@ object StringsZh : Strings() {
     override val radarSolarNoon = "太阳正午"
     override val radarPolarDay = "极昼"
     override val radarPolarNight = "极夜"
+    override val radarOpenIn = "在以下打开…"
 }

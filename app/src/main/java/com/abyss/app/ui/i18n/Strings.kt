@@ -494,6 +494,8 @@ abstract class Strings {
     abstract val radarPolarDay: String
     abstract val radarPolarNight: String
 
+    abstract val radarOpenIn: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

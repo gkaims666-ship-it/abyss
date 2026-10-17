@@ -483,4 +483,5 @@ object StringsJa : Strings() {
     override val radarSolarNoon = "南中"
     override val radarPolarDay = "白夜"
     override val radarPolarNight = "極夜"
+    override val radarOpenIn = "次で開く…"
 }
