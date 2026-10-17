@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,6 +71,10 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -121,6 +126,15 @@ import com.abyss.app.feature.radar.RoadIncident
 import com.abyss.app.feature.radar.RoadKeys
 import com.abyss.app.feature.radar.RoadKind
 import com.abyss.app.feature.radar.RoadLogic
+import com.abyss.app.feature.radar.AlertKind
+import com.abyss.app.feature.radar.AlertLevel
+import com.abyss.app.feature.radar.AlertLogic
+import com.abyss.app.feature.radar.AlertState
+import com.abyss.app.feature.radar.RegionAlert
+import com.abyss.app.feature.radar.SafetyApi
+import com.abyss.app.feature.radar.Shelter
+import com.abyss.app.feature.radar.ShelterKind
+import com.abyss.app.feature.radar.ShelterLogic
 import com.abyss.app.feature.radar.MapGestureEngine
 import com.abyss.app.feature.radar.MapGestureSink
 import com.abyss.app.feature.radar.BaseLayer
@@ -187,6 +201,12 @@ private class AbyssMapView(ctx: Context) : MapView(ctx) {
 private const val KEY_TOMTOM = "tomtom"
 private const val KEY_HERE = "here"
 private const val KEY_WINDY = "windy"
+private const val KEY_ALERTS = "alertsua"
+
+private fun shelterEmoji(k: ShelterKind): String = when (k) {
+    ShelterKind.Bomb -> "🛡️"; ShelterKind.Metro -> "🚇"; ShelterKind.Underground -> "🅿️"
+    ShelterKind.Parking -> "🅿️"; ShelterKind.General -> "🏠"
+}
 
 private fun roadEmoji(k: RoadKind): String = when (k) {
     RoadKind.Accident -> "💥"; RoadKind.Jam -> "🚗"; RoadKind.Closure -> "⛔"; RoadKind.LaneClosed -> "🚧"
@@ -260,6 +280,16 @@ private class RadarController(private val app: Context, private val scope: Corou
     var camLoading by mutableStateOf(false)
     var roadListOpen by mutableStateOf(false)
     var keyVersion by mutableStateOf(0)
+
+    // Civil defence: public air-raid alerts + civilian shelters
+    var alertsOn by mutableStateOf(false)
+    var sheltersOn by mutableStateOf(false)
+    var alertState by mutableStateOf<AlertState?>(null)
+    var shelters by mutableStateOf<List<Shelter>>(emptyList())
+    var selectedShelter by mutableStateOf<Shelter?>(null)
+    var sheltersTooFar by mutableStateOf(false)
+    var findingShelter by mutableStateOf(false)
+    var nearestShelters by mutableStateOf<List<Shelter>?>(null)
     var planesOn by mutableStateOf(true)
     var sheetOpen by mutableStateOf(false)
 
@@ -326,6 +356,7 @@ private class RadarController(private val app: Context, private val scope: Corou
                 if (measuring) { addMeasurePoint(pt); return true }
                 if (selectedEvent != null) { selectedEvent = null; return true }
                 if (selectedRoad != null || selectedCam != null) { selectedRoad = null; selectedCam = null; return true }
+                if (selectedShelter != null) { selectedShelter = null; return true }
                 if (selected != null) { select(null); return true }
                 if (pin != null) { clearPin(); return true }
                 return false
@@ -339,6 +370,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         pinFolder = FolderOverlay().also { mv.overlays.add(it) }
         roadFolder = FolderOverlay().also { mv.overlays.add(it) }
         camFolder = FolderOverlay().also { mv.overlays.add(it) }
+        shelterFolder = FolderOverlay().also { mv.overlays.add(it) }
         eventsFolder = FolderOverlay().also { mv.overlays.add(it) }
 
         val ov = PlaneOverlay(ctx.resources.displayMetrics.density)
@@ -355,6 +387,8 @@ private class RadarController(private val app: Context, private val scope: Corou
         trafficOn = prefs.getBoolean("traffic", false)
         roadOn = prefs.getBoolean("road", false)
         camsOn = prefs.getBoolean("cams", false)
+        alertsOn = prefs.getBoolean("alerts", false)
+        sheltersOn = prefs.getBoolean("shelters", false)
         dark = null   // force first tile source
         applyLayer()
         applyPalette(palette)
@@ -492,7 +526,11 @@ private class RadarController(private val app: Context, private val scope: Corou
             camsAt = now
             scope.launch { refreshCams() }
         }
-        if ((roadOn || camsOn) && moved) roadDirty = false
+        if (alertsOn && now - alertsAt > 45_000) { alertsAt = now; scope.launch { refreshAlerts() } }
+        if (sheltersOn && ((moved && now - sheltersAt > 3_000) || now - sheltersAt > 5 * 60_000)) {
+            sheltersAt = now; scope.launch { refreshShelters() }
+        }
+        if ((roadOn || camsOn || sheltersOn) && moved) roadDirty = false
         if (trafficOn && now - trafficAt > 120_000) refreshTraffic()
     }
 
@@ -1066,6 +1104,127 @@ private class RadarController(private val app: Context, private val scope: Corou
             android.graphics.drawable.BitmapDrawable(app.resources, bmp)
         }
 
+
+    // ------------------------------------------------------------ civil defence
+
+    private var shelterFolder: FolderOverlay? = null
+    private var alertsAt = 0L
+    private var sheltersAt = 0L
+    private var alertRegionAt = 0L
+
+    fun toggleAlerts() {
+        alertsOn = !alertsOn
+        prefs.edit().putBoolean("alerts", alertsOn).apply()
+        if (alertsOn) { alertsAt = 0L; scope.launch { refreshAlerts() } }
+        else { alertState = null }
+    }
+
+    fun toggleShelters() {
+        sheltersOn = !sheltersOn
+        prefs.edit().putBoolean("shelters", sheltersOn).apply()
+        if (sheltersOn) { sheltersAt = 0L; roadDirty = true; dirty = true; lastFetch = 0L }
+        else { shelterFolder?.items?.clear(); shelters = emptyList(); selectedShelter = null; map?.invalidate() }
+    }
+
+    private suspend fun refreshAlerts() {
+        val token = keyStore.getKey(KEY_ALERTS) ?: ""
+        val list = SafetyApi.activeAlerts(token)
+        if (!alertsOn) return
+        if (list == null) { alertState = AlertState(emptyList(), System.currentTimeMillis(), ok = false, myRegion = alertState?.myRegion); return }
+        // Which region am I in? (refreshed occasionally; uses GPS if we have it)
+        val now = System.currentTimeMillis()
+        var region = alertState?.myRegion
+        var mine: RegionAlert? = null
+        val here = me ?: map?.let { doubleArrayOf(it.mapCenter.latitude, it.mapCenter.longitude) }
+        if (here != null && (region == null || now - alertRegionAt > 10 * 60_000L)) {
+            val r = runCatching { GeoApi.regionOf(here[0], here[1]) }.getOrNull()
+            if (r != null) {
+                alertRegionAt = now
+                region = r.city ?: r.state
+                mine = AlertLogic.matchRegion(r.state, r.city, r.country, list)
+            }
+        } else if (here != null) {
+            val r = runCatching { GeoApi.regionOf(here[0], here[1]) }.getOrNull()
+            mine = if (r != null) AlertLogic.matchRegion(r.state, r.city, r.country, list) else null
+        }
+        alertState = AlertState(list.sortedWith(AlertLogic::worseFirst), now, ok = true, mine = mine, myRegion = region)
+    }
+
+    private suspend fun refreshShelters() {
+        val mv = map ?: return
+        val b = box() ?: return
+        sheltersTooFar = mv.zoomLevelDouble < 12.0
+        if (sheltersTooFar && nearestShelters == null) { shelterFolder?.items?.clear(); shelters = emptyList(); mv.invalidate(); return }
+        val list = runCatching { SafetyApi.shelters(b) }.getOrNull() ?: return
+        if (!sheltersOn) return
+        shelters = list
+        drawShelters()
+    }
+
+    private fun drawShelters() {
+        val mv = map ?: return
+        val folder = shelterFolder ?: return
+        folder.items.clear()
+        for (sh in shelters) {
+            val m = Marker(mv)
+            m.position = GeoPoint(sh.lat, sh.lon)
+            m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            m.icon = badge("shelter-${sh.kind}", shelterEmoji(sh.kind), 0xFF2563EB.toInt(), null)
+            m.setOnMarkerClickListener { _, _ -> openShelter(sh); true }
+            folder.add(m)
+        }
+        mv.invalidate()
+    }
+
+    fun openShelter(sh: Shelter) {
+        select(null); clearPin(); selectedEvent = null; selectedRoad = null; selectedCam = null
+        selectedShelter = sh
+    }
+
+    /** "I'm being attacked — where do I hide?": locate, pull shelters, route to the nearest. */
+    fun findNearestShelter() {
+        findingShelter = true
+        if (!sheltersOn) toggleShelters()
+        if (!locate()) { locationDenied = true }
+        scope.launch {
+            // Wait briefly for a location fix.
+            var here = me
+            var tries = 0
+            while (here == null && tries < 20) { kotlinx.coroutines.delay(150); here = me; tries++ }
+            val center = here ?: map?.let { doubleArrayOf(it.mapCenter.latitude, it.mapCenter.longitude) }
+            if (center == null) { findingShelter = false; return@launch }
+            // Query a wide-ish area around the user so there is something to pick.
+            val d = 0.06
+            val b = GeoBox(center[0] + d, center[0] - d, center[1] + d * 1.6, center[1] - d * 1.6)
+            val list = runCatching { SafetyApi.shelters(b) }.getOrNull().orEmpty()
+            shelters = list
+            drawShelters()
+            val near = ShelterLogic.nearest(list, center[0], center[1], 20)
+            nearestShelters = near
+            findingShelter = false
+            near.firstOrNull()?.let { sh ->
+                selectedShelter = sh
+                flyTo(sh.lat, sh.lon, (map?.zoomLevelDouble ?: 15.0).coerceAtLeast(15.0))
+            }
+        }
+    }
+
+    fun clearNearest() { nearestShelters = null }
+
+    /** Walking directions to a shelter in the user's map app (OSM fallback). */
+    fun routeTo(sh: Shelter) {
+        val from = me
+        val geo = "geo:${sh.lat},${sh.lon}?q=${sh.lat},${sh.lon}(" + enc(sh.name ?: "Shelter") + ")"
+        val osm = if (from != null)
+            "https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=${from[0]}%2C${from[1]}%3B${sh.lat}%2C${sh.lon}"
+        else "https://www.openstreetmap.org/?mlat=${sh.lat}&mlon=${sh.lon}#map=17/${sh.lat}/${sh.lon}"
+        runCatching {
+            app.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(geo)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { openUrl(osm) }
+    }
+
+    private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
+
     fun resetNorth() {
         if (map == null) return
         syncCam()
@@ -1325,11 +1484,13 @@ fun RadarScreen(palette: AbyssPalette) {
     }
 
     BackHandler(enabled = active && (ctl.selected != null || ctl.selectedEvent != null || ctl.selectedRoad != null ||
-        ctl.selectedCam != null || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
+        ctl.selectedCam != null || ctl.selectedShelter != null || ctl.nearestShelters != null || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
         when {
             ctl.sheetOpen -> ctl.sheetOpen = false
             ctl.roadListOpen -> ctl.roadListOpen = false
             ctl.selectedCam != null -> ctl.selectedCam = null
+            ctl.selectedShelter != null -> ctl.selectedShelter = null
+            ctl.nearestShelters != null -> ctl.clearNearest()
             ctl.selectedRoad != null -> ctl.selectedRoad = null
             ctl.results != null -> ctl.results = null
             ctl.placeResults != null -> ctl.placeResults = null
@@ -1416,6 +1577,7 @@ fun RadarScreen(palette: AbyssPalette) {
                     focusManager.clearFocus(); ctl.focusPlace(pl, S.code)
                 }
             }
+            AlertBanner(ctl, palette, S)
         }
 
         // ---------------------------------------------------- right: controls
@@ -1423,6 +1585,7 @@ fun RadarScreen(palette: AbyssPalette) {
             Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            RoundButton(Icons.Filled.Shield, S.safetyFindShelter, palette, active = ctl.findingShelter) { ctl.findNearestShelter() }
             if (ctl.orientation != 0f) RoundButton(Icons.Filled.Explore, S.radarResetNorth, palette) { ctl.resetNorth() }
             RoundButton(Icons.Filled.Layers, S.radarLayers, palette, active = ctl.sheetOpen) { ctl.sheetOpen = true }
             RoundButton(Icons.Filled.MyLocation, S.radarMyLocation, palette) {
@@ -1459,7 +1622,12 @@ fun RadarScreen(palette: AbyssPalette) {
                 if (cm != null) CameraCard(cm, ctl.camBitmap, ctl.camLoading, palette, S,
                     onRefresh = { ctl.reloadCamImage() }, onOpen = { ctl.openUrl(cm.pageUrl) }, onClose = { ctl.selectedCam = null })
             }
-            if (ctl.roadOn && ctl.roadIncidents.isNotEmpty() && ctl.selectedRoad == null && ctl.selected == null && ctl.selectedCam == null) {
+            val shc = ctl.selectedShelter
+            AnimatedVisibility(shc != null && ctl.selected == null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
+                if (shc != null) ShelterCard(shc, ctl.me, ctl.metric, palette, S,
+                    onRoute = { ctl.routeTo(shc) }, onClose = { ctl.selectedShelter = null })
+            }
+            if (ctl.roadOn && ctl.roadIncidents.isNotEmpty() && ctl.selectedRoad == null && ctl.selected == null && ctl.selectedCam == null && ctl.selectedShelter == null) {
                 Spacer(Modifier.height(6.dp))
                 Row(
                     Modifier.clip(RoundedCornerShape(14.dp)).background(palette.surface.copy(alpha = 0.92f))
@@ -1471,6 +1639,12 @@ fun RadarScreen(palette: AbyssPalette) {
                     Spacer(Modifier.width(6.dp))
                     Text(S.roadList(ctl.roadIncidents.size), color = palette.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
+            }
+            if (ctl.sheltersOn && ctl.sheltersTooFar && ctl.nearestShelters == null && ctl.selectedShelter == null) {
+                Spacer(Modifier.height(6.dp))
+                Text(S.safetyZoomForShelters, color = palette.onSurface.copy(alpha = 0.7f), fontSize = 11.5.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(palette.surface.copy(alpha = 0.85f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp))
             }
             if (ctl.camsOn && ctl.camsTooFar) {
                 Spacer(Modifier.height(6.dp))
@@ -1514,6 +1688,13 @@ fun RadarScreen(palette: AbyssPalette) {
         ) {
             RoadListSheet(ctl.roadIncidents, ctl.metric, palette, S) { ctl.focusRoad(it) }
         }
+        val nearest = ctl.nearestShelters
+        AnimatedVisibility(nearest != null && ctl.selectedShelter == null, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+            NearestSheet(nearest ?: emptyList(), ctl.findingShelter, ctl.metric, palette, S,
+                onPick = { ctl.openShelter(it); ctl.flyTo(it.lat, it.lon, (ctl.map?.zoomLevelDouble ?: 16.0).coerceAtLeast(16.0)) },
+                onRoute = { ctl.routeTo(it) }, onClose = { ctl.clearNearest() })
+        }
 
         // Long-press hint, shown briefly when the map is idle and empty-handed.
         if (!ctl.sheetOpen && ctl.selected == null && ctl.pin == null && ctl.selectedEvent == null && !ctl.measuring) {
@@ -1555,6 +1736,8 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) 
         ToggleRow(Icons.Filled.MenuBook, S.radarOverlayWiki, ctl.wikiOn, palette) { ctl.toggleWiki() }
         ToggleRow(Icons.Filled.Bolt, S.radarOverlayEvents, ctl.eventsOn, palette) { ctl.toggleEvents() }
         ToggleRow(Icons.Filled.DarkMode, S.radarOverlayTerminator, ctl.terminatorOn, palette) { ctl.toggleTerminator() }
+        Spacer(Modifier.height(18.dp))
+        SafetySection(ctl, palette, S)
         Spacer(Modifier.height(18.dp))
         RoadSection(ctl, palette, S)
         Spacer(Modifier.height(18.dp))
@@ -2374,6 +2557,175 @@ private fun RoadListSheet(list: List<RoadIncident>, metric: Boolean, palette: Ab
                     }
                     i.lengthM?.takeIf { it > 0 }?.let {
                         Text(lengthText(it, metric, S), color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+// ============================================================ civil defence UI
+
+@Composable
+private fun SafetySection(ctl: RadarController, palette: AbyssPalette, S: Strings) {
+    @Suppress("UNUSED_VARIABLE") val kv = ctl.keyVersion
+    Text(S.safetySection, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
+    Text(S.safetyHint, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp, lineHeight = 16.sp,
+        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
+    val hasToken = ctl.keyOf(KEY_ALERTS).isNotEmpty()
+    val alertLabel = if (!hasToken) S.safetyAlerts + " · " + S.safetyNeedToken else S.safetyAlerts
+    ToggleRow(Icons.Filled.Campaign, alertLabel, ctl.alertsOn, palette) { ctl.toggleAlerts() }
+    ToggleRow(Icons.Filled.Home, S.safetyShelters, ctl.sheltersOn, palette) { ctl.toggleShelters() }
+    Spacer(Modifier.height(6.dp))
+    KeyField("alerts.in.ua", KEY_ALERTS, "https://alerts.in.ua/", ctl, palette, S)
+}
+
+private fun alertKindLabel(k: AlertKind, S: Strings) = when (k) {
+    AlertKind.AirRaid -> S.alertAirRaid; AlertKind.Artillery -> S.alertArtillery; AlertKind.UrbanFights -> S.alertUrbanFights
+    AlertKind.Chemical -> S.alertChemical; AlertKind.Nuclear -> S.alertNuclear; AlertKind.Other -> S.alertOther
+}
+
+@Composable
+private fun AlertBanner(ctl: RadarController, palette: AbyssPalette, S: Strings) {
+    if (!ctl.alertsOn) return
+    val st = ctl.alertState ?: return
+    val mine = st.mine
+    Spacer(Modifier.height(8.dp))
+    if (mine != null) {
+        val red = mine.level == AlertLevel.Red
+        val bg = if (red) Color(0xFFD32F2F) else Color(0xFFF5A623)
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(bg)
+                .clickable { if (!ctl.sheltersOn) ctl.toggleShelters(); ctl.findNearestShelter() }.padding(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Warning, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(alertKindLabel(mine.kind, S), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(st.myRegion ?: mine.title, color = Color.White.copy(alpha = 0.92f), fontSize = 13.sp)
+                }
+            }
+            if (mine.threats.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(mine.threats.joinToString(" · "), color = Color.White.copy(alpha = 0.92f), fontSize = 12.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.22f))
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Shield, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(S.safetyToShelter, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    } else {
+        val calm = st.ok && st.myRegion != null
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                .background(palette.surface.copy(alpha = 0.92f))
+                .border(1.dp, palette.outline, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(9.dp).clip(CircleShape).background(if (calm) Color(0xFF5DBB7B) else palette.secondary))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                when {
+                    !st.ok -> S.safetyNeedToken
+                    calm -> S.safetyCalm(st.myRegion ?: "")
+                    else -> S.safetyActiveCount(st.active.size)
+                },
+                color = palette.onSurface, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+            if (st.active.isNotEmpty()) Text(S.safetyActiveCount(st.active.size), color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
+        }
+    }
+}
+
+private fun shelterKindLabel(k: ShelterKind, S: Strings) = when (k) {
+    ShelterKind.Bomb -> S.shelterBomb; ShelterKind.Metro -> S.shelterMetro; ShelterKind.Underground -> S.shelterUnderground
+    ShelterKind.Parking -> S.shelterParking; ShelterKind.General -> S.shelterGeneral
+}
+
+@Composable
+private fun ShelterCard(sh: Shelter, me: DoubleArray?, metric: Boolean, palette: AbyssPalette, S: Strings, onRoute: () -> Unit, onClose: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
+            .border(1.dp, palette.outline, RoundedCornerShape(22.dp)).padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(38.dp).clip(CircleShape).background(Color(0xFF2563EB).copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                Text(shelterEmoji(sh.kind), fontSize = 18.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(sh.name ?: shelterKindLabel(sh.kind, S), color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 18.sp,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                val d = if (me != null) dist(sh.distanceNm.takeIf { it > 0 } ?: distanceNm(me[0], me[1], sh.lat, sh.lon), metric, S) else null
+                Text(listOfNotNull(shelterKindLabel(sh.kind, S), d).joinToString(" · "),
+                    color = palette.onSurface.copy(alpha = 0.65f), fontSize = 13.sp)
+            }
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+            }
+        }
+        sh.operator?.let { DetailRow(S.shelterOperator, it, palette) }
+        sh.capacity?.let { DetailRow(S.shelterCapacity, it, palette) }
+        DetailRow(S.radarCoordinates, "%.5f, %.5f".format(java.util.Locale.US, sh.lat, sh.lon), palette)
+        Spacer(Modifier.height(8.dp))
+        Text(S.roadSourceLabel + ": OpenStreetMap", color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.5.sp)
+        Spacer(Modifier.height(10.dp))
+        WideButton(Icons.Filled.Navigation, S.safetyRoute, palette, onRoute)
+    }
+}
+
+@Composable
+private fun NearestSheet(
+    list: List<Shelter>, loading: Boolean, metric: Boolean, palette: AbyssPalette, S: Strings,
+    onPick: (Shelter) -> Unit, onRoute: (Shelter) -> Unit, onClose: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding().heightIn(max = 520.dp)
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(palette.surface)
+            .border(1.dp, palette.outline, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).padding(top = 14.dp),
+    ) {
+        Box(Modifier.align(Alignment.CenterHorizontally).size(width = 34.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp)).background(palette.outline))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Shield, null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(S.safetyNearestTitle, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp, modifier = Modifier.weight(1f))
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(17.dp))
+            }
+        }
+        if (list.isEmpty()) {
+            Text(if (loading) S.radarLoading else S.safetyNoShelters, color = palette.onSurface.copy(alpha = 0.6f),
+                fontSize = 14.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+        } else LazyColumn {
+            itemsIndexed(list) { i, sh ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPick(sh) }.padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(34.dp).clip(CircleShape).background(
+                        (if (i == 0) Color(0xFF2563EB) else Color(0xFF2563EB).copy(alpha = 0.16f))), contentAlignment = Alignment.Center) {
+                        Text(shelterEmoji(sh.kind), fontSize = 15.sp)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(sh.name ?: shelterKindLabel(sh.kind, S), color = palette.onSurface, fontSize = 14.5.sp,
+                            fontWeight = if (i == 0) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(shelterKindLabel(sh.kind, S) + " · " + dist(sh.distanceNm, metric, S),
+                            color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.5.sp)
+                    }
+                    Box(Modifier.size(36.dp).clip(CircleShape).background(palette.primary.copy(alpha = 0.14f))
+                        .clickable { onRoute(sh) }, contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Navigation, S.safetyRoute, tint = palette.primary, modifier = Modifier.size(18.dp))
                     }
                 }
             }

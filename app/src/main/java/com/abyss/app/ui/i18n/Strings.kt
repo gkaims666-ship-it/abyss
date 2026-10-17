@@ -418,6 +418,34 @@ abstract class Strings {
     abstract val roadSaveKey: String
     abstract val roadKeySaved: String
 
+    // ---- radar: civil defence (alerts + shelters)
+    abstract val safetySection: String
+    abstract val safetyHint: String
+    abstract val safetyAlerts: String
+    abstract val safetyShelters: String
+    abstract val safetyNeedToken: String
+    abstract val safetyFindShelter: String
+    abstract val safetyToShelter: String
+    abstract fun safetyCalm(region: String): String
+    abstract fun safetyActiveCount(n: Int): String
+    abstract val safetyZoomForShelters: String
+    abstract val safetyNearestTitle: String
+    abstract val safetyNoShelters: String
+    abstract val safetyRoute: String
+    abstract val alertAirRaid: String
+    abstract val alertArtillery: String
+    abstract val alertUrbanFights: String
+    abstract val alertChemical: String
+    abstract val alertNuclear: String
+    abstract val alertOther: String
+    abstract val shelterBomb: String
+    abstract val shelterMetro: String
+    abstract val shelterUnderground: String
+    abstract val shelterParking: String
+    abstract val shelterGeneral: String
+    abstract val shelterOperator: String
+    abstract val shelterCapacity: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto
