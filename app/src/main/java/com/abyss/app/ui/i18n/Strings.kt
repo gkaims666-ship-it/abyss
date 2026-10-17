@@ -475,6 +475,10 @@ abstract class Strings {
     abstract val radarNoBookmarks: String
     abstract val radarSave: String
 
+    // ---- radar: aircraft in view
+    abstract val radarInView: String
+    abstract fun radarInViewCount(n: Int): String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

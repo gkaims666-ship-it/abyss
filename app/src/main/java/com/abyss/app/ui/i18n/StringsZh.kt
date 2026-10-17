@@ -466,4 +466,8 @@ object StringsZh : Strings() {
     override val radarBookmarks = "已保存的地点"
     override val radarNoBookmarks = "还没有保存的地点"
     override val radarSave = "保存"
+
+    // ---- radar: aircraft in view
+    override val radarInView = "视野内的飞机"
+    override fun radarInViewCount(n: Int) = "视野内 · $n"
 }

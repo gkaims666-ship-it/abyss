@@ -466,4 +466,8 @@ object StringsUk : Strings() {
     override val radarBookmarks = "Збережені місця"
     override val radarNoBookmarks = "Збережених місць поки немає"
     override val radarSave = "Зберегти"
+
+    // ---- radar: aircraft in view
+    override val radarInView = "Літаки в зоні видимості"
+    override fun radarInViewCount(n: Int) = "У зоні видимості · $n"
 }

@@ -82,6 +82,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -128,6 +129,7 @@ import androidx.core.content.ContextCompat
 import com.abyss.app.feature.radar.AircraftInfo
 import com.abyss.app.feature.radar.Bookmark
 import com.abyss.app.feature.radar.Bookmarks
+import com.abyss.app.feature.radar.PlaneList
 import com.abyss.app.feature.radar.MapCamera
 import com.abyss.app.feature.radar.CamKind
 import com.abyss.app.feature.radar.GeoBox
@@ -315,6 +317,7 @@ private class RadarController(private val app: Context, private val scope: Corou
     var pin by mutableStateOf<DoubleArray?>(null)
     var bookmarks by mutableStateOf<List<Bookmark>>(emptyList())
     var bookmarksOpen by mutableStateOf(false)
+    var planesListOpen by mutableStateOf(false)
     var pinPlace by mutableStateOf<Place?>(null)
     var pinLoading by mutableStateOf(false)
 
@@ -641,6 +644,19 @@ private class RadarController(private val app: Context, private val scope: Corou
         val mv = map ?: return
         p.positionAt(System.currentTimeMillis(), tmp)
         flyTo(tmp[0], tmp[1], mv.zoomLevelDouble.coerceAtLeast(7.5), ms = 700L)
+    }
+
+    fun planesInView(): List<Plane> {
+        val bb = map?.boundingBox ?: return emptyList()
+        val c = map?.mapCenter ?: return emptyList()
+        return PlaneList.inView(planes, bb.latNorth, bb.latSouth, bb.lonEast, bb.lonWest, c.latitude, c.longitude)
+    }
+
+    /** From the list: focus the plane and keep the map on it. */
+    fun focusAndFollow(p: Plane) {
+        planesListOpen = false
+        focus(p)
+        following = true
     }
 
     fun setFilterTo(f: RadarFilter) {
@@ -1575,7 +1591,7 @@ fun RadarScreen(palette: AbyssPalette) {
     val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     BackHandler(enabled = active && (ctl.selected != null || ctl.selectedEvent != null || ctl.selectedRoad != null ||
-        ctl.selectedCam != null || ctl.selectedShelter != null || ctl.nearestShelters != null || ctl.historyOpen || ctl.bookmarksOpen || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
+        ctl.selectedCam != null || ctl.selectedShelter != null || ctl.nearestShelters != null || ctl.historyOpen || ctl.bookmarksOpen || ctl.planesListOpen || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
         when {
             ctl.sheetOpen -> ctl.sheetOpen = false
             ctl.roadListOpen -> ctl.roadListOpen = false
@@ -1584,6 +1600,7 @@ fun RadarScreen(palette: AbyssPalette) {
             ctl.nearestShelters != null -> ctl.clearNearest()
             ctl.historyOpen -> ctl.historyOpen = false
             ctl.bookmarksOpen -> ctl.bookmarksOpen = false
+            ctl.planesListOpen -> ctl.planesListOpen = false
             ctl.selectedRoad != null -> ctl.selectedRoad = null
             ctl.results != null -> ctl.results = null
             ctl.placeResults != null -> ctl.placeResults = null
@@ -1685,6 +1702,7 @@ fun RadarScreen(palette: AbyssPalette) {
             if (ctl.orientation != 0f) RoundButton(Icons.Filled.Explore, S.radarResetNorth, palette, iconRotation = -ctl.orientation) { ctl.resetNorth() }
             RoundButton(Icons.Filled.Layers, S.radarLayers, palette, active = ctl.sheetOpen) { ctl.sheetOpen = true }
             if (ctl.bookmarks.isNotEmpty()) RoundButton(Icons.Filled.Bookmarks, S.radarBookmarks, palette) { ctl.bookmarksOpen = true }
+            if (ctl.planesOn && ctl.planes.isNotEmpty()) RoundButton(Icons.AutoMirrored.Filled.FormatListBulleted, S.radarInView, palette) { ctl.planesListOpen = true }
             RoundButton(Icons.Filled.MyLocation, S.radarMyLocation, palette) {
                 if (!ctl.locate()) locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
             }
@@ -1810,6 +1828,15 @@ fun RadarScreen(palette: AbyssPalette) {
             enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
             BookmarksSheet(ctl.bookmarks, ctl.me, ctl.metric, palette, S,
                 onPick = { ctl.goToBookmark(it, S.code) }, onDelete = { ctl.removeBookmark(it) }, onClose = { ctl.bookmarksOpen = false })
+        }
+        AnimatedVisibility(ctl.planesListOpen, enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
+                .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { ctl.planesListOpen = false })
+        }
+        AnimatedVisibility(ctl.planesListOpen, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+            PlanesInViewSheet(ctl.planesInView(), ctl.metric, palette, S,
+                onPick = { ctl.focusAndFollow(it) }, onClose = { ctl.planesListOpen = false })
         }
 
         // Long-press hint, shown briefly when the map is idle and empty-handed.
@@ -3009,6 +3036,51 @@ private fun BookmarksSheet(
                     Box(Modifier.size(32.dp).clip(CircleShape).clickable { onDelete(b.id) }, contentAlignment = Alignment.Center) {
                         Icon(Icons.Filled.Close, S.radarClear, tint = palette.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
                     }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+@Composable
+private fun PlanesInViewSheet(
+    list: List<Plane>, metric: Boolean, palette: AbyssPalette, S: Strings,
+    onPick: (Plane) -> Unit, onClose: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding().heightIn(max = 540.dp)
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(palette.surface)
+            .border(1.dp, palette.outline, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).padding(top = 14.dp),
+    ) {
+        Box(Modifier.align(Alignment.CenterHorizontally).size(width = 34.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp)).background(palette.outline))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Flight, null, tint = palette.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(S.radarInViewCount(list.size), color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp, modifier = Modifier.weight(1f))
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(17.dp))
+            }
+        }
+        if (list.isEmpty()) {
+            Text(S.radarNoResults, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 14.sp,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+        } else LazyColumn {
+            items(list, key = { it.hex }) { p ->
+                Row(Modifier.fillMaxWidth().clickable { onPick(p) }.padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Flight,
+                        null, tint = if (p.isEmergency) palette.error else if (p.military) palette.secondary else palette.primary,
+                        modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = (p.track ?: 0.0).toFloat() })
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(p.callsign?.ifBlank { null } ?: p.reg ?: p.hex.uppercase(), color = palette.onSurface,
+                            fontFamily = AbyssFonts.Code, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(listOfNotNull(p.reg, p.type, p.operator).joinToString(" · ").ifBlank { p.hex.uppercase() },
+                            color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text(altitude(p, metric, S), color = palette.onSurface.copy(alpha = 0.75f), fontSize = 12.sp, fontFamily = AbyssFonts.Code)
                 }
             }
         }
