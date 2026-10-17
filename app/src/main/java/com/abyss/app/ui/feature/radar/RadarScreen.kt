@@ -87,6 +87,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.layout.ContentScale
@@ -101,6 +105,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.abyss.app.feature.radar.AircraftInfo
+import com.abyss.app.feature.radar.MapCamera
+import com.abyss.app.feature.radar.MapGestureEngine
+import com.abyss.app.feature.radar.MapGestureSink
 import com.abyss.app.feature.radar.BaseLayer
 import com.abyss.app.feature.radar.FlightInfo
 import com.abyss.app.feature.radar.RadarSnapshot
@@ -133,6 +140,7 @@ import org.osmdroid.tileprovider.MapTileProviderBasic
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.TileSystem
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.FolderOverlay
@@ -142,7 +150,6 @@ import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.TilesOverlay
 import org.osmdroid.events.MapEventsReceiver
-import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import java.io.File
 import kotlin.math.ceil
 import kotlin.math.roundToInt
@@ -151,21 +158,20 @@ private enum class RadarFilter { All, Military, Emergency, Airborne }
 private enum class SearchMode { Planes, Places }
 
 /**
- * osmdroid's MapView hosted in Compose: on touch-down it asks every parent not
- * to intercept, so Compose hands the WHOLE gesture (drag, pinch, fling) to the
- * map instead of cancelling it midway. Without this the map can refuse to pan.
+ * osmdroid is used purely as a renderer. Its own touch handling (multi-touch
+ * controller + scale "pin") could get stuck and freeze panning, so touches
+ * never reach it: a Compose layer runs [MapGestureEngine] and drives the
+ * camera directly, Google-Maps style.
  */
 private class AbyssMapView(ctx: Context) : MapView(ctx) {
-    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
-        when (ev.actionMasked) {
-            android.view.MotionEvent.ACTION_DOWN,
-            android.view.MotionEvent.ACTION_POINTER_DOWN -> parent?.requestDisallowInterceptTouchEvent(true)
-            android.view.MotionEvent.ACTION_UP,
-            android.view.MotionEvent.ACTION_CANCEL -> parent?.requestDisallowInterceptTouchEvent(false)
-        }
-        return super.dispatchTouchEvent(ev)
-    }
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean = false
 }
+
+/** Fling glide time constant (s): distance = v·τ. Close to Google Maps' feel. */
+private const val FLING_TAU = 0.34
+private const val ZOOM_FLING_TAU = 0.16
+private const val ZOOM_ANIM_S = 0.28
 
 /** Inverts map tiles for a dark-theme "night" basemap (no keyed dark service). */
 private val NIGHT_FILTER = ColorMatrixColorFilter(ColorMatrix(floatArrayOf(
@@ -265,15 +271,13 @@ private class RadarController(private val app: Context, private val scope: Corou
         cfg.osmdroidTileCache = File(ctx.cacheDir, "osmdroid/tiles")
 
         val mv = AbyssMapView(ctx)
-        mv.isClickable = true
-        mv.isFlingEnabled = true
-        mv.setMultiTouchControls(true)
+        mv.isFlingEnabled = false
+        mv.setMultiTouchControls(false)
         mv.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
         mv.isTilesScaledToDpi = true
         mv.minZoomLevel = 2.5
         mv.maxZoomLevel = 18.0
         mv.isVerticalMapRepetitionEnabled = false
-        mv.setScrollableAreaLimitLatitude(85.0, -85.0, 0)
         // Bottom → top: map tiles, weather, wiki pins, measure line, dropped pin,
         // aircraft (topmost so plane taps win), map-events (empty-map taps).
         val events = MapEventsOverlay(object : MapEventsReceiver {
@@ -299,10 +303,6 @@ private class RadarController(private val app: Context, private val scope: Corou
         mv.overlays.add(ov)
         map = mv; overlay = ov
 
-        val rotation = RotationGestureOverlay(mv)
-        rotation.isEnabled = true
-        mv.overlays.add(rotation)
-
         layer = BaseLayer.entries.firstOrNull { it.id == prefs.getString("layer", "abyss") } ?: BaseLayer.Abyss
         prefs.getString("sources", null)?.let { saved ->
             val set = saved.split(',').mapNotNull { id -> RadarSource.entries.firstOrNull { it.id == id } }.toSet()
@@ -318,6 +318,9 @@ private class RadarController(private val app: Context, private val scope: Corou
             override fun onScroll(event: ScrollEvent?): Boolean { moved(); return false }
             override fun onZoom(event: ZoomEvent?): Boolean { moved(); return false }
         })
+        mv.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or_, ob ->
+            if (r - l != or_ - ol || b - t != ob - ot) syncCam()
+        }
         mv.onResume()
         return mv
     }
@@ -361,13 +364,15 @@ private class RadarController(private val app: Context, private val scope: Corou
     /** Per frame: follow the selected aircraft and repaint (planes glide). */
     fun frame() {
         val mv = map ?: return
+        stepCamera(System.nanoTime())
         val s = selected
-        if (following && s != null) {
+        if (following && s != null && !touching && fly == null) {
             s.positionAt(System.currentTimeMillis(), tmp)
-            mv.controller.setCenter(GeoPoint(tmp[0], tmp[1]))
+            cam.set(tmp[0], tmp[1])
+            pushCam()
         }
         val o = mv.mapOrientation
-        if (kotlin.math.abs(o - orientation) > 0.4f) orientation = o
+        if (kotlin.math.abs(o - orientation) > 0.4f || (o == 0f && orientation != 0f)) orientation = o
         if (terminatorOn && System.currentTimeMillis() - terminatorAt > 60_000L) refreshTerminator()
         mv.invalidate()
     }
@@ -513,7 +518,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         select(p)
         val mv = map ?: return
         p.positionAt(System.currentTimeMillis(), tmp)
-        mv.controller.animateTo(GeoPoint(tmp[0], tmp[1]), mv.zoomLevelDouble.coerceAtLeast(7.5), 700L)
+        flyTo(tmp[0], tmp[1], mv.zoomLevelDouble.coerceAtLeast(7.5), ms = 700L)
     }
 
     fun setFilterTo(f: RadarFilter) {
@@ -645,7 +650,7 @@ private class RadarController(private val app: Context, private val scope: Corou
             m.setOnMarkerClickListener { mk, _ ->
                 select(null); clearPin()
                 selectedEvent = mk.relatedObject as? MapEvent
-                mk.position?.let { map?.controller?.animateTo(it) }
+                mk.position?.let { flyTo(it.latitude, it.longitude) }
                 true
             }
             folder.add(m)
@@ -763,8 +768,142 @@ private class RadarController(private val app: Context, private val scope: Corou
     }
 
     fun resetNorth() {
-        map?.let { it.mapOrientation = 0f; orientation = 0f; it.invalidate() }
+        if (map == null) return
+        syncCam()
+        flyTo(cam.lat, cam.lon, bearing = 0.0, ms = 380L)
     }
+
+    // ------------------------------------------------------------ camera + gestures
+
+    /** The single source of truth for where the map looks; pushed into osmdroid. */
+    val cam = MapCamera(mapSize = { z -> TileSystem.MapSize(z) })
+    var touching = false
+        private set
+
+    // fling (screen px/s), zoom fling (levels/s), discrete zoom, fly-to
+    private var flVx = 0f; private var flVy = 0f
+    private var zfV = 0.0; private var zfX = 0f; private var zfY = 0f
+    private var zaFrom = 0.0; private var zaTo = 0.0; private var zaX = 0f; private var zaY = 0f
+    private var zaStart = 0L; private var zaOn = false
+    private class Fly(
+        val lat0: Double, val lon0: Double, val z0: Double, val b0: Double,
+        val lat1: Double, val dLon: Double, val z1: Double, val dB: Double,
+        val arc: Double, val start: Long, val dur: Long,
+    )
+    private var fly: Fly? = null
+    private var lastStep = 0L
+
+    fun syncCam() {
+        val mv = map ?: return
+        if (mv.width > 0) { cam.width = mv.width.toFloat(); cam.height = mv.height.toFloat() }
+        cam.minZoom = mv.minZoomLevel
+        cam.maxZoom = mv.maxZoomLevel
+        val c = mv.mapCenter
+        cam.set(c.latitude, c.longitude, mv.zoomLevelDouble, mv.mapOrientation.toDouble())
+    }
+
+    private fun pushCam() {
+        val mv = map ?: return
+        val b = cam.bearing.toFloat()
+        if (mv.mapOrientation != b) mv.setMapOrientation(b, false)
+        if (kotlin.math.abs(mv.zoomLevelDouble - cam.zoom) > 1e-9) mv.setZoomLevel(cam.zoom)
+        mv.setExpectedCenter(GeoPoint(cam.lat, cam.lon))
+        mv.invalidate()
+    }
+
+    private fun stopCamAnim() {
+        flVx = 0f; flVy = 0f; zfV = 0.0; zaOn = false; fly = null
+        map?.controller?.stopAnimation(false)
+    }
+
+    /** Smooth camera flight; long hops zoom out a little mid-way, like Google Maps. */
+    fun flyTo(lat: Double, lon: Double, zoom: Double? = null, bearing: Double? = null, ms: Long = 700L) {
+        val mv = map ?: return
+        stopCamAnim()
+        syncCam()
+        if (mv.width == 0) {   // not laid out yet: jump
+            cam.set(lat, lon, zoom ?: cam.zoom, bearing ?: cam.bearing); pushCam(); return
+        }
+        val z1 = (zoom ?: cam.zoom).coerceIn(cam.minZoom, cam.maxZoom)
+        val dLon = MapCamera.angleDelta(cam.lon, lon)
+        val s = TileSystem.MapSize(minOf(cam.zoom, z1))
+        val dx = dLon / 360.0 * s
+        val dy = MapCamera.mercY(lat, s) - MapCamera.mercY(cam.lat, s)
+        val screens = kotlin.math.hypot(dx, dy) / maxOf(cam.width, cam.height)
+        val arc = if (screens > 1.5) (kotlin.math.ln(screens) / kotlin.math.ln(2.0)).coerceIn(0.0, 3.0) else 0.0
+        fly = Fly(cam.lat, cam.lon, cam.zoom, cam.bearing, lat, dLon, z1,
+            MapCamera.angleDelta(cam.bearing, bearing ?: cam.bearing), arc,
+            System.nanoTime(), (ms + (arc * 120).toLong()) * 1_000_000L)
+    }
+
+    private fun stepCamera(now: Long) {
+        val dt = if (lastStep == 0L) 0.016 else ((now - lastStep) / 1e9).coerceIn(0.0, 0.05)
+        lastStep = now
+        var moved = false
+        fly?.let { f ->
+            val p = ((now - f.start).toDouble() / f.dur).coerceIn(0.0, 1.0)
+            val e = if (p < 0.5) 4 * p * p * p else 1 - Math.pow(-2 * p + 2, 3.0) / 2
+            val z = f.z0 + (f.z1 - f.z0) * e - f.arc * kotlin.math.sin(Math.PI * e)
+            cam.set(f.lat0 + (f.lat1 - f.lat0) * e, f.lon0 + f.dLon * e, z, f.b0 + f.dB * e)
+            moved = true
+            if (p >= 1.0) fly = null
+        }
+        if (flVx != 0f || flVy != 0f) {
+            val k = kotlin.math.exp(-dt / FLING_TAU)
+            val dist = FLING_TAU * (1 - k)
+            cam.pan((flVx * dist).toFloat(), (flVy * dist).toFloat())
+            flVx = (flVx * k).toFloat(); flVy = (flVy * k).toFloat()
+            if (kotlin.math.hypot(flVx, flVy) < 12f) { flVx = 0f; flVy = 0f }
+            moved = true
+        }
+        if (zfV != 0.0) {
+            val k = kotlin.math.exp(-dt / ZOOM_FLING_TAU)
+            cam.zoomAround(zfV * ZOOM_FLING_TAU * (1 - k), zfX, zfY)
+            zfV *= k
+            if (kotlin.math.abs(zfV) < 0.05) zfV = 0.0
+            moved = true
+        }
+        if (zaOn) {
+            val p = ((now - zaStart) / 1e9 / ZOOM_ANIM_S).coerceIn(0.0, 1.0)
+            val e = 1 - (1 - p) * (1 - p) * (1 - p)
+            cam.zoomAround(zaFrom + (zaTo - zaFrom) * e - cam.zoom, zaX, zaY)
+            if (p >= 1.0) zaOn = false
+            moved = true
+        }
+        if (moved) pushCam()
+    }
+
+    /** Taps go to osmdroid overlays exactly as its own detector would send them. */
+    private fun dispatchTap(x: Float, y: Float, long: Boolean) {
+        val mv = map ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        val e = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_UP, x, y, 0)
+        if (mv.mapOrientation != 0f) e.transform(mv.projection.invertedScaleRotateCanvasMatrix)
+        if (long) mv.overlayManager.onLongPress(e, mv) else mv.overlayManager.onSingleTapConfirmed(e, mv)
+        e.recycle()
+    }
+
+    val gestures = object : MapGestureSink {
+        override fun gestureStart() { touching = true; stopCamAnim(); syncCam() }
+        override fun userMoved() { if (following) following = false }
+        override fun pan(dx: Float, dy: Float) { cam.pan(dx, dy); pushCam() }
+        override fun zoom(dz: Double, fx: Float, fy: Float) { cam.zoomAround(dz, fx, fy); pushCam() }
+        override fun rotate(deg: Double, fx: Float, fy: Float) { cam.rotateAround(deg, fx, fy); pushCam() }
+        override fun fling(vx: Float, vy: Float) { flVx = vx; flVy = vy; lastStep = 0L }
+        override fun zoomFling(vz: Double, fx: Float, fy: Float) { zfV = vz; zfX = fx; zfY = fy; lastStep = 0L }
+        override fun animateZoom(dz: Double, fx: Float, fy: Float) {
+            syncCam()
+            zaFrom = cam.zoom; zaTo = (cam.zoom + dz).coerceIn(cam.minZoom, cam.maxZoom)
+            zaX = fx; zaY = fy; zaStart = System.nanoTime(); zaOn = true
+        }
+        override fun tap(x: Float, y: Float) = dispatchTap(x, y, long = false)
+        override fun longPress(x: Float, y: Float) {
+            map?.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            dispatchTap(x, y, long = true)
+        }
+    }
+
+    fun touchEnded() { touching = false }
 
     // ------------------------------------------------------------ place search
 
@@ -783,14 +922,14 @@ private class RadarController(private val app: Context, private val scope: Corou
     fun goToQuery(q: String, lang: String): Boolean {
         val c = parseLatLon(q) ?: return false
         placeResults = null
-        map?.controller?.animateTo(GeoPoint(c.lat, c.lon), 13.0, 800L)
+        flyTo(c.lat, c.lon, 13.0, ms = 800L)
         dropPin(c.lat, c.lon, lang)
         return true
     }
 
     fun focusPlace(place: Place, lang: String) {
         placeResults = null
-        map?.controller?.animateTo(GeoPoint(place.lat, place.lon), 12.0, 800L)
+        flyTo(place.lat, place.lon, 12.0, ms = 800L)
         dropPin(place.lat, place.lon, lang)
     }
 
@@ -827,7 +966,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         me = here
         overlay?.me = here
         following = false
-        map?.controller?.animateTo(GeoPoint(here[0], here[1]), 9.0, 800L)
+        flyTo(here[0], here[1], 9.0, ms = 800L)
     }
 }
 
@@ -905,6 +1044,7 @@ fun RadarScreen(palette: AbyssPalette) {
                 update = { ctl.applyPalette(palette) },
                 modifier = Modifier.fillMaxSize(),
             )
+            MapGestureLayer(ctl)
         }
 
         // ---------------------------------------------------- top: search + filters
@@ -1539,4 +1679,60 @@ private fun EventCard(e: MapEvent, palette: AbyssPalette, S: Strings, onOpen: ()
             }
         }
     }
+}
+
+/**
+ * Transparent layer over the map that turns raw pointers into camera moves via
+ * [MapGestureEngine]: drag + fling, pinch-zoom + rotate together, double tap,
+ * double-tap-drag, two-finger tap, long press, mouse wheel. UI drawn after it
+ * (buttons, cards, sheets) sits above and keeps its own touches.
+ */
+@Composable
+private fun MapGestureLayer(ctl: RadarController) {
+    val density = LocalDensity.current.density
+    Box(Modifier.fillMaxSize().pointerInput(ctl) {
+        val eng = MapGestureEngine(density, ctl.gestures)
+        val mid = LongArray(10)
+        val mx = FloatArray(10)
+        val my = FloatArray(10)
+        awaitPointerEventScope {
+            while (true) {
+                val dl = eng.nextDeadline()
+                val ev: PointerEvent? = if (dl == Long.MAX_VALUE) awaitPointerEvent() else {
+                    val wait = dl - android.os.SystemClock.uptimeMillis()
+                    if (wait <= 0L) null else withTimeoutOrNull(wait) { awaitPointerEvent() }
+                }
+                if (ev == null) { eng.tick(android.os.SystemClock.uptimeMillis()); continue }
+                if (ev.type == PointerEventType.Scroll) {
+                    val c = ev.changes.first()
+                    val dy = c.scrollDelta.y
+                    if (dy != 0f) {
+                        ctl.gestures.gestureStart()
+                        ctl.gestures.animateZoom(if (dy < 0f) 1.0 else -1.0, c.position.x, c.position.y)
+                        ctl.touchEnded()
+                    }
+                    ev.changes.forEach { it.consume() }
+                    continue
+                }
+                var t = 0L
+                for (c in ev.changes) {
+                    if (c.uptimeMillis > t) t = c.uptimeMillis
+                    if (c.pressed && !c.previousPressed) eng.onDown(c.id.value, c.position.x, c.position.y, c.uptimeMillis)
+                }
+                var k = 0
+                for (c in ev.changes) {
+                    if (c.pressed && c.previousPressed && k < mid.size) {
+                        mid[k] = c.id.value; mx[k] = c.position.x; my[k] = c.position.y; k++
+                    }
+                }
+                if (k > 0) eng.onMove(t, mid, mx, my, k)
+                for (c in ev.changes) {
+                    if (!c.pressed && c.previousPressed) eng.onUp(c.id.value, c.position.x, c.position.y, c.uptimeMillis)
+                }
+                ev.changes.forEach { it.consume() }
+                if (!eng.isActive) ctl.touchEnded()
+                eng.tick(t)
+            }
+        }
+    })
 }
