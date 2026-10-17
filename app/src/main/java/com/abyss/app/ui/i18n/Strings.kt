@@ -328,6 +328,36 @@ abstract class Strings {
     abstract val unitNm: String
     abstract val unitSec: String
 
+    // ---- radar: maps, layers, OSINT geo tools
+    abstract val radarLayers: String
+    abstract val radarLayerAbyss: String
+    abstract val radarLayerStreets: String
+    abstract val radarLayerSatellite: String
+    abstract val radarLayerTerrain: String
+    abstract val radarLayerTransport: String
+    abstract val radarOverlays: String
+    abstract val radarOverlayWeather: String
+    abstract val radarOverlayWiki: String
+    abstract val radarOverlayPlanes: String
+    abstract val radarSearchPlanes: String
+    abstract val radarSearchPlaces: String
+    abstract val radarPlacesHint: String
+    abstract val radarPoint: String
+    abstract val radarCoordinates: String
+    abstract val radarShare: String
+    abstract fun radarFromMe(d: String): String
+    abstract fun radarNearbyWiki(n: Int): String
+    abstract val radarOpenArticle: String
+    abstract val radarReverseFail: String
+    abstract val radarDropPinHint: String
+    abstract val radarMeasure: String
+    abstract val radarMeasureHint: String
+    abstract fun radarTotal(d: String): String
+    abstract val radarClear: String
+    abstract val radarResetNorth: String
+    abstract val radarLocating: String
+    abstract val radarWikiTitle: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

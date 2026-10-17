@@ -1,6 +1,9 @@
 package com.abyss.app.ui.feature.radar
 
 import android.Manifest
+import android.content.Intent
+import android.graphics.Color as AndroidColor
+import android.net.Uri
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
@@ -45,7 +48,13 @@ import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Umbrella
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -68,7 +77,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -78,7 +89,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.abyss.app.feature.radar.BaseLayer
+import com.abyss.app.feature.radar.GeoApi
+import com.abyss.app.feature.radar.Place
 import com.abyss.app.feature.radar.Plane
+import com.abyss.app.feature.radar.WikiPlace
 import com.abyss.app.feature.radar.RadarApi
 import com.abyss.app.feature.radar.Route
 import com.abyss.app.feature.radar.distanceNm
@@ -94,15 +109,25 @@ import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
 import org.osmdroid.events.ZoomEvent
+import org.osmdroid.tileprovider.MapTileProviderBasic
 import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.FolderOverlay
+import org.osmdroid.views.overlay.MapEventsOverlay
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.TilesOverlay
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import java.io.File
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 private enum class RadarFilter { All, Military, Emergency, Airborne }
+private enum class SearchMode { Planes, Places }
 
 /**
  * Map + live data for the radar. Lives exactly as long as the screen: leaving
@@ -127,6 +152,28 @@ private class RadarController(private val app: Context, private val scope: Corou
     var metric by mutableStateOf(true)
     var locationDenied by mutableStateOf(false)
 
+    // Map layers + open-data overlays
+    var layer by mutableStateOf(BaseLayer.Abyss)
+    var weatherOn by mutableStateOf(false)
+    var wikiOn by mutableStateOf(false)
+    var planesOn by mutableStateOf(true)
+    var sheetOpen by mutableStateOf(false)
+
+    // Search mode + place results
+    var searchMode by mutableStateOf(SearchMode.Planes)
+    var placeResults by mutableStateOf<List<Place>?>(null)
+
+    // Long-press pin + reverse geocode
+    var pin by mutableStateOf<DoubleArray?>(null)
+    var pinPlace by mutableStateOf<Place?>(null)
+    var pinLoading by mutableStateOf(false)
+
+    // Measure tool
+    var measuring by mutableStateOf(false)
+    var measureTotalNm by mutableStateOf(0.0)
+    private val measurePts = ArrayList<GeoPoint>()
+    var orientation by mutableStateOf(0f)
+
     var lastFetch = 0L
     var movedAt = 0L
     var dirty = true
@@ -136,6 +183,14 @@ private class RadarController(private val app: Context, private val scope: Corou
     private val routeCache = HashMap<String, Route?>()
     private val prefs = app.getSharedPreferences("radar", Context.MODE_PRIVATE)
     private val tmp = DoubleArray(2)
+    private var pinFolder: FolderOverlay? = null
+    private var wikiFolder: FolderOverlay? = null
+    private var measureFolder: FolderOverlay? = null
+    private var measureLine: Polyline? = null
+    private var weatherOverlay: TilesOverlay? = null
+    private var weatherTemplate: String? = null
+    private var weatherFetchedAt = 0L
+    private var wikiAt = 0L
 
     // ------------------------------------------------------------ map
 
@@ -154,11 +209,36 @@ private class RadarController(private val app: Context, private val scope: Corou
         mv.maxZoomLevel = 18.0
         mv.isVerticalMapRepetitionEnabled = false
         mv.setScrollableAreaLimitLatitude(85.0, -85.0, 0)
+        // Bottom → top: map tiles, weather, wiki pins, measure line, dropped pin,
+        // aircraft (topmost so plane taps win), map-events (empty-map taps).
+        val events = MapEventsOverlay(object : MapEventsReceiver {
+            override fun singleTapConfirmedHelper(pt: GeoPoint): Boolean {
+                if (measuring) { addMeasurePoint(pt); return true }
+                if (selected != null) { select(null); return true }
+                if (pin != null) { clearPin(); return true }
+                return false
+            }
+            override fun longPressHelper(pt: GeoPoint): Boolean { dropPin(pt.latitude, pt.longitude); return true }
+        })
+        mv.overlays.add(events)
+
+        wikiFolder = FolderOverlay().also { mv.overlays.add(it) }
+        measureFolder = FolderOverlay().also { mv.overlays.add(it) }
+        pinFolder = FolderOverlay().also { mv.overlays.add(it) }
+
         val ov = PlaneOverlay(ctx.resources.displayMetrics.density)
         ov.onTap = { p -> select(p) }
         ov.onUserGesture = { if (following) following = false }
         mv.overlays.add(ov)
         map = mv; overlay = ov
+
+        val rotation = RotationGestureOverlay(mv)
+        rotation.isEnabled = true
+        mv.overlays.add(rotation)
+
+        layer = BaseLayer.entries.firstOrNull { it.id == prefs.getString("layer", "abyss") } ?: BaseLayer.Abyss
+        dark = null   // force first tile source
+        applyLayer()
         applyPalette(palette)
 
         mv.controller.setZoom(prefs.getFloat("z", 6.5f).toDouble())
@@ -176,12 +256,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         val ov = overlay ?: return
         if (dark != p.dark) {
             dark = p.dark
-            val style = if (p.dark) "dark_all" else "light_all"
-            mv.setTileSource(XYTileSource(
-                if (p.dark) "AbyssCartoDark" else "AbyssCartoLight", 1, 19, 256, "@2x.png",
-                arrayOf("a", "b", "c", "d").map { "https://$it.basemaps.cartocdn.com/$style/" }.toTypedArray(),
-                "© OpenStreetMap contributors © CARTO",
-            ))
+            applyLayer()
             val bg = p.background.toArgb()
             mv.setBackgroundColor(bg)
             mv.overlayManager.tilesOverlay.setLoadingBackgroundColor(bg)
@@ -220,6 +295,8 @@ private class RadarController(private val app: Context, private val scope: Corou
             s.positionAt(System.currentTimeMillis(), tmp)
             mv.controller.setCenter(GeoPoint(tmp[0], tmp[1]))
         }
+        val o = mv.mapOrientation
+        if (kotlin.math.abs(o - orientation) > 0.4f) orientation = o
         mv.invalidate()
     }
 
@@ -263,7 +340,15 @@ private class RadarController(private val app: Context, private val scope: Corou
         }
         loading = false
         push()
+        if (wikiOn && System.currentTimeMillis() - wikiAt > 1500) {
+            wikiAt = System.currentTimeMillis()
+            scope.launch { refreshWiki(currentLang) }
+        }
     }
+
+    /** UI language tag, set by the screen so background lookups match it. */
+    var currentLang: String = "en"
+
 
     /** Remembers positions so a selected aircraft shows where it has been. */
     private fun record(list: List<Plane>) {
@@ -339,6 +424,174 @@ private class RadarController(private val app: Context, private val scope: Corou
         }
     }
 
+    // ------------------------------------------------------------ layers & overlays
+
+    private fun applyLayer() {
+        val mv = map ?: return
+        mv.setTileSource(layer.tileSource(dark ?: false))
+        mv.maxZoomLevel = layer.maxZoom.toDouble()
+    }
+
+    fun setLayer(l: BaseLayer) {
+        if (layer == l) return
+        layer = l
+        applyLayer()
+        prefs.edit().putString("layer", l.id).apply()
+    }
+
+    fun toggleWeather() {
+        weatherOn = !weatherOn
+        if (weatherOn) scope.launch { refreshWeather() } else removeWeather()
+    }
+
+    private suspend fun refreshWeather() {
+        val mv = map ?: return
+        val now = System.currentTimeMillis()
+        if (weatherTemplate == null || now - weatherFetchedAt > 5 * 60_000L) {
+            weatherTemplate = runCatching { GeoApi.weatherTileTemplate() }.getOrNull()
+            weatherFetchedAt = now
+        }
+        val tmpl = weatherTemplate ?: run { weatherOn = false; return }
+        removeWeather()
+        val provider = MapTileProviderBasic(app)
+        provider.setTileSource(XYTileSource(
+            "rainviewer", 1, 18, 256,
+            tmpl.substringAfter("{z}/{x}/{y}"), arrayOf(tmpl.substringBefore("{z}/{x}/{y}")),
+        ))
+        val ov = TilesOverlay(provider, app)
+        ov.loadingBackgroundColor = AndroidColor.TRANSPARENT
+        weatherOverlay = ov
+        mv.overlays.add(0, ov)
+        mv.invalidate()
+    }
+
+    private fun removeWeather() {
+        val mv = map ?: return
+        weatherOverlay?.let { mv.overlays.remove(it); it.onDetach(mv) }
+        weatherOverlay = null
+        mv.invalidate()
+    }
+
+    fun toggleWiki() {
+        wikiOn = !wikiOn
+        if (wikiOn) { wikiAt = 0L; dirty = true } else { wikiFolder?.items?.clear(); map?.invalidate() }
+    }
+
+    private suspend fun refreshWiki(lang: String) {
+        val mv = map ?: return
+        val c = mv.mapCenter
+        val bb = mv.boundingBox
+        val radius = (distanceNm(bb.latNorth, bb.lonWest, bb.latSouth, bb.lonEast) * 1852.0 / 2.0)
+            .toInt().coerceIn(500, 10000)
+        val places = runCatching { GeoApi.wikiNearby(c.latitude, c.longitude, radius, lang) }.getOrNull() ?: return
+        val folder = wikiFolder ?: return
+        folder.items.clear()
+        for (w in places) {
+            val m = Marker(mv)
+            m.position = GeoPoint(w.lat, w.lon)
+            m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            m.title = w.title
+            m.subDescription = GeoApi.wikiArticleUrl(w)
+            m.setOnMarkerClickListener { mk, _ -> openUrl(mk.subDescription); true }
+            folder.add(m)
+        }
+        mv.invalidate()
+    }
+
+    fun openUrl(url: String?) {
+        url ?: return
+        runCatching {
+            app.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
+    // ------------------------------------------------------------ pin
+
+    fun dropPin(lat: Double, lon: Double, lang: String = "en") {
+        select(null)
+        pin = doubleArrayOf(lat, lon)
+        pinPlace = null
+        pinLoading = true
+        val mv = map ?: return
+        val folder = pinFolder ?: return
+        folder.items.clear()
+        val m = Marker(mv)
+        m.position = GeoPoint(lat, lon)
+        m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+        folder.add(m)
+        mv.invalidate()
+        scope.launch {
+            val place = runCatching { GeoApi.reverse(lat, lon, lang) }.getOrNull()
+            if (pin?.get(0) == lat && pin?.get(1) == lon) { pinPlace = place; pinLoading = false }
+        }
+    }
+
+    fun clearPin() {
+        pin = null; pinPlace = null; pinLoading = false
+        pinFolder?.items?.clear(); map?.invalidate()
+    }
+
+    // ------------------------------------------------------------ measure
+
+    fun toggleMeasure() {
+        measuring = !measuring
+        if (!measuring) clearMeasure()
+    }
+
+    fun clearMeasure() {
+        measurePts.clear(); measureTotalNm = 0.0
+        measureFolder?.items?.clear(); measureLine = null; map?.invalidate()
+    }
+
+    private fun addMeasurePoint(pt: GeoPoint) {
+        val mv = map ?: return
+        val folder = measureFolder ?: return
+        measurePts.add(pt)
+        val dot = Marker(mv)
+        dot.position = pt
+        dot.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+        folder.add(dot)
+        if (measurePts.size >= 2) {
+            val line = Polyline()
+            line.setPoints(ArrayList(measurePts))
+            line.outlinePaint.color = AndroidColor.rgb(0xF0, 0xA8, 0x4C)
+            line.outlinePaint.strokeWidth = 5f
+            measureFolder?.let { f -> measureLine?.let { f.remove(it) } }
+            measureLine = line
+            folder.add(line)
+            var total = 0.0
+            for (i in 1 until measurePts.size) {
+                total += distanceNm(measurePts[i - 1].latitude, measurePts[i - 1].longitude,
+                    measurePts[i].latitude, measurePts[i].longitude)
+            }
+            measureTotalNm = total
+        }
+        mv.invalidate()
+    }
+
+    fun resetNorth() {
+        map?.let { it.mapOrientation = 0f; orientation = 0f; it.invalidate() }
+    }
+
+    // ------------------------------------------------------------ place search
+
+    fun searchPlaces(query: String, lang: String) {
+        val t = query.trim()
+        if (t.isEmpty()) { placeResults = null; return }
+        placeResults = emptyList()
+        searching = true
+        scope.launch {
+            placeResults = runCatching { GeoApi.searchPlaces(t, lang) }.getOrDefault(emptyList())
+            searching = false
+        }
+    }
+
+    fun focusPlace(place: Place, lang: String) {
+        placeResults = null
+        map?.controller?.animateTo(GeoPoint(place.lat, place.lon), 12.0, 800L)
+        dropPin(place.lat, place.lon, lang)
+    }
+
     // ------------------------------------------------------------ location
 
     fun locate(): Boolean {
@@ -384,6 +637,8 @@ fun RadarScreen(palette: AbyssPalette) {
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val ctl = remember { RadarController(context.applicationContext, scope) }
+    ctl.currentLang = S.code
+    val clipboard = LocalClipboardManager.current
 
     // The map view is created once the tool's slide-in has finished, so opening
     // the radar never drops frames.
@@ -428,11 +683,14 @@ fun RadarScreen(palette: AbyssPalette) {
         }
     }
 
-    BackHandler(enabled = active && (ctl.selected != null || ctl.results != null)) {
-        if (ctl.results != null) {
-            ctl.results = null
-        } else {
-            ctl.select(null)
+    BackHandler(enabled = active && (ctl.selected != null || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
+        when {
+            ctl.sheetOpen -> ctl.sheetOpen = false
+            ctl.results != null -> ctl.results = null
+            ctl.placeResults != null -> ctl.placeResults = null
+            ctl.measuring -> ctl.toggleMeasure()
+            ctl.pin != null -> ctl.clearPin()
+            else -> ctl.select(null)
         }
     }
 
@@ -457,37 +715,57 @@ fun RadarScreen(palette: AbyssPalette) {
             ) {
                 Icon(Icons.Filled.Search, null, tint = palette.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(10.dp))
+                val places = ctl.searchMode == SearchMode.Places
                 Box(Modifier.weight(1f)) {
-                    if (query.isEmpty()) Text(S.radarSearchHint, color = palette.onSurface.copy(alpha = 0.42f), fontSize = 15.sp)
+                    if (query.isEmpty()) Text(if (places) S.radarPlacesHint else S.radarSearchHint,
+                        color = palette.onSurface.copy(alpha = 0.42f), fontSize = 15.sp)
                     BasicTextField(
                         value = query,
-                        onValueChange = { query = it; if (it.isBlank()) ctl.results = null },
+                        onValueChange = { query = it; if (it.isBlank()) { ctl.results = null; ctl.placeResults = null } },
                         singleLine = true,
                         textStyle = TextStyle(color = palette.onSurface, fontSize = 15.sp),
                         cursorBrush = SolidColor(palette.primary),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { ctl.search(query); focusManager.clearFocus() }),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            if (places) ctl.searchPlaces(query, S.code) else ctl.search(query)
+                            focusManager.clearFocus()
+                        }),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
                 if (query.isNotEmpty()) {
                     Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.6f),
                         modifier = Modifier.size(20.dp).clip(CircleShape).clickable {
-                            query = ""; ctl.results = null; focusManager.clearFocus()
+                            query = ""; ctl.results = null; ctl.placeResults = null; focusManager.clearFocus()
                         })
                 }
             }
             Spacer(Modifier.height(8.dp))
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(S.radarFilterAll, ctl.filter == RadarFilter.All, palette) { ctl.setFilterTo(RadarFilter.All) }
-                FilterChip(S.radarFilterAirborne, ctl.filter == RadarFilter.Airborne, palette) { ctl.setFilterTo(RadarFilter.Airborne) }
-                FilterChip(S.radarFilterMilitary, ctl.filter == RadarFilter.Military, palette) { ctl.setFilterTo(RadarFilter.Military) }
-                FilterChip(S.radarFilterEmergency, ctl.filter == RadarFilter.Emergency, palette) { ctl.setFilterTo(RadarFilter.Emergency) }
+                FilterChip(S.radarSearchPlanes, ctl.searchMode == SearchMode.Planes, palette) {
+                    ctl.searchMode = SearchMode.Planes; ctl.placeResults = null
+                }
+                FilterChip(S.radarSearchPlaces, ctl.searchMode == SearchMode.Places, palette) {
+                    ctl.searchMode = SearchMode.Places; ctl.results = null
+                }
+                Spacer(Modifier.width(4.dp))
+                if (ctl.searchMode == SearchMode.Planes) {
+                    FilterChip(S.radarFilterAll, ctl.filter == RadarFilter.All, palette) { ctl.setFilterTo(RadarFilter.All) }
+                    FilterChip(S.radarFilterAirborne, ctl.filter == RadarFilter.Airborne, palette) { ctl.setFilterTo(RadarFilter.Airborne) }
+                    FilterChip(S.radarFilterMilitary, ctl.filter == RadarFilter.Military, palette) { ctl.setFilterTo(RadarFilter.Military) }
+                    FilterChip(S.radarFilterEmergency, ctl.filter == RadarFilter.Emergency, palette) { ctl.setFilterTo(RadarFilter.Emergency) }
+                }
             }
             val res = ctl.results
-            AnimatedVisibility(res != null, enter = fadeIn() + slideInVertically { -it / 6 }, exit = fadeOut()) {
+            AnimatedVisibility(res != null && ctl.searchMode == SearchMode.Planes, enter = fadeIn() + slideInVertically { -it / 6 }, exit = fadeOut()) {
                 SearchResults(res ?: emptyList(), ctl.searching, palette, S) { p ->
                     ctl.results = null; focusManager.clearFocus(); ctl.focus(p)
+                }
+            }
+            val pres = ctl.placeResults
+            AnimatedVisibility(pres != null && ctl.searchMode == SearchMode.Places, enter = fadeIn() + slideInVertically { -it / 6 }, exit = fadeOut()) {
+                PlaceResults(pres ?: emptyList(), ctl.searching, palette, S) { pl ->
+                    focusManager.clearFocus(); ctl.focusPlace(pl, S.code)
                 }
             }
         }
@@ -497,9 +775,12 @@ fun RadarScreen(palette: AbyssPalette) {
             Modifier.align(Alignment.CenterEnd).padding(end = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (ctl.orientation != 0f) RoundButton(Icons.Filled.Explore, S.radarResetNorth, palette) { ctl.resetNorth() }
+            RoundButton(Icons.Filled.Layers, S.radarLayers, palette, active = ctl.sheetOpen) { ctl.sheetOpen = true }
             RoundButton(Icons.Filled.MyLocation, S.radarMyLocation, palette) {
                 if (!ctl.locate()) locLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
             }
+            RoundButton(Icons.Filled.Timeline, S.radarMeasure, palette, active = ctl.measuring) { ctl.toggleMeasure() }
             RoundButton(Icons.Filled.Straighten, if (ctl.metric) S.radarUnitsMetric else S.radarUnitsImperial, palette) {
                 ctl.metric = !ctl.metric
             }
@@ -507,17 +788,208 @@ fun RadarScreen(palette: AbyssPalette) {
 
         // ---------------------------------------------------- bottom: status / details
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(12.dp)) {
+            AnimatedVisibility(ctl.measuring, enter = fadeIn(), exit = fadeOut()) {
+                MeasureBar(ctl.measureTotalNm, ctl.metric, palette, S) { ctl.clearMeasure() }
+            }
             val sel = ctl.selected
             AnimatedVisibility(sel != null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
                 if (sel != null) PlaneCard(sel, ctl.route, ctl.following, ctl.metric, palette, S,
                     onFollow = { ctl.following = !ctl.following },
                     onClose = { ctl.select(null) })
             }
+            val showPin = ctl.pin != null && ctl.selected == null
+            AnimatedVisibility(showPin, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
+                ctl.pin?.let { pt ->
+                    PinCard(pt, ctl.pinPlace, ctl.pinLoading, ctl.me, ctl.metric, palette, S,
+                        onCopy = { clipboard.setText(AnnotatedString("%.5f, %.5f".format(java.util.Locale.US, pt[0], pt[1]))) },
+                        onShare = { ctl.openUrl("https://www.openstreetmap.org/?mlat=%.5f&mlon=%.5f#map=15/%.5f/%.5f".format(java.util.Locale.US, pt[0], pt[1], pt[0], pt[1])) },
+                        onClose = { ctl.clearPin() })
+                }
+            }
             Spacer(Modifier.height(8.dp))
             StatusPill(ctl, palette, S)
             Text(S.radarCredit, color = palette.onSurface.copy(alpha = 0.45f), fontSize = 9.5.sp,
                 modifier = Modifier.padding(start = 6.dp, top = 4.dp))
         }
+
+        // Dim scrim + bottom sheet for map layers & overlays.
+        AnimatedVisibility(ctl.sheetOpen, enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
+                .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { ctl.sheetOpen = false })
+        }
+        AnimatedVisibility(
+            ctl.sheetOpen, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut(),
+        ) {
+            LayerSheet(ctl, palette, S)
+        }
+
+        // Long-press hint, shown briefly when the map is idle and empty-handed.
+        if (!ctl.sheetOpen && ctl.selected == null && ctl.pin == null && !ctl.measuring) {
+            Text(S.radarDropPinHint, color = palette.onSurface.copy(alpha = 0.4f), fontSize = 10.5.sp,
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 108.dp))
+        }
+    }
+}
+
+@Composable
+private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) {
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding()
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+            .background(palette.surface)
+            .border(1.dp, palette.outline, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+            .padding(18.dp),
+    ) {
+        Box(Modifier.align(Alignment.CenterHorizontally).size(width = 34.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp)).background(palette.outline))
+        Spacer(Modifier.height(14.dp))
+        Text(S.radarLayers, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LayerChip(S.radarLayerAbyss, ctl.layer == BaseLayer.Abyss, palette) { ctl.setLayer(BaseLayer.Abyss) }
+            LayerChip(S.radarLayerStreets, ctl.layer == BaseLayer.Streets, palette) { ctl.setLayer(BaseLayer.Streets) }
+            LayerChip(S.radarLayerSatellite, ctl.layer == BaseLayer.Satellite, palette) { ctl.setLayer(BaseLayer.Satellite) }
+            LayerChip(S.radarLayerTerrain, ctl.layer == BaseLayer.Terrain, palette) { ctl.setLayer(BaseLayer.Terrain) }
+            LayerChip(S.radarLayerTransport, ctl.layer == BaseLayer.Transport, palette) { ctl.setLayer(BaseLayer.Transport) }
+        }
+        Spacer(Modifier.height(18.dp))
+        Text(S.radarOverlays, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
+        Spacer(Modifier.height(10.dp))
+        ToggleRow(Icons.Filled.Flight, S.radarOverlayPlanes, ctl.planesOn, palette) {
+            ctl.planesOn = !ctl.planesOn; ctl.overlay?.isEnabled = ctl.planesOn; ctl.map?.invalidate()
+        }
+        ToggleRow(Icons.Filled.MenuBook, S.radarOverlayWiki, ctl.wikiOn, palette) { ctl.toggleWiki() }
+        ToggleRow(Icons.Filled.Umbrella, S.radarOverlayWeather, ctl.weatherOn, palette) { ctl.toggleWeather() }
+        Spacer(Modifier.height(6.dp))
+    }
+}
+
+@Composable
+private fun LayerChip(label: String, selected: Boolean, palette: AbyssPalette, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(14.dp))
+            .background(if (selected) palette.primary else palette.surfaceVariant)
+            .border(1.dp, if (selected) palette.primary else palette.outline, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+    ) {
+        Text(label, color = if (selected) palette.onPrimary else palette.onSurface, fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal)
+    }
+}
+
+@Composable
+private fun ToggleRow(icon: ImageVector, label: String, on: Boolean, palette: AbyssPalette, onToggle: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onToggle)
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = if (on) palette.primary else palette.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = palette.onSurface, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Box(Modifier.size(width = 42.dp, height = 24.dp).clip(RoundedCornerShape(12.dp))
+            .background(if (on) palette.primary else palette.outline)) {
+            Box(Modifier.size(18.dp).padding(0.dp).align(if (on) Alignment.CenterEnd else Alignment.CenterStart)
+                .padding(horizontal = 3.dp).clip(CircleShape).background(palette.onPrimary))
+        }
+    }
+}
+
+@Composable
+private fun PlaceResults(list: List<Place>, searching: Boolean, palette: AbyssPalette, S: Strings, onPick: (Place) -> Unit) {
+    Column(
+        Modifier.padding(top = 8.dp).fillMaxWidth().heightIn(max = 320.dp)
+            .clip(RoundedCornerShape(18.dp)).background(palette.surface.copy(alpha = 0.97f))
+            .border(1.dp, palette.outline, RoundedCornerShape(18.dp)),
+    ) {
+        if (list.isEmpty()) {
+            Text(if (searching) S.radarSearching else S.radarNoResults, color = palette.onSurface.copy(alpha = 0.6f),
+                fontSize = 14.sp, modifier = Modifier.padding(16.dp))
+        } else {
+            LazyColumn {
+                items(list) { pl ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onPick(pl) }.padding(horizontal = 16.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Place, null, tint = palette.primary, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(pl.name, color = palette.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (pl.detail != null) Text(pl.detail, color = palette.onSurface.copy(alpha = 0.55f),
+                                fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MeasureBar(totalNm: Double, metric: Boolean, palette: AbyssPalette, S: Strings, onClear: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(palette.surface.copy(alpha = 0.95f))
+            .border(1.dp, palette.outline, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Timeline, null, tint = palette.primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(if (totalNm > 0) S.radarTotal(dist(totalNm, metric, S)) else S.radarMeasureHint,
+                color = palette.onSurface, fontSize = 13.sp)
+        }
+        Text(S.radarClear, color = palette.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClear).padding(horizontal = 10.dp, vertical = 4.dp))
+    }
+}
+
+@Composable
+private fun PinCard(
+    pt: DoubleArray, place: Place?, loading: Boolean, me: DoubleArray?, metric: Boolean,
+    palette: AbyssPalette, S: Strings, onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
+            .border(1.dp, palette.outline, RoundedCornerShape(22.dp)).padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Place, null, tint = palette.primary, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(place?.name ?: (if (loading) S.radarSearching else S.radarPoint),
+                    color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 18.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (place?.detail != null) Text(place.detail, color = palette.onSurface.copy(alpha = 0.6f),
+                    fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("${S.radarCoordinates}:  %.5f, %.5f".format(java.util.Locale.US, pt[0], pt[1]),
+            color = palette.onSurface, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+        if (me != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(S.radarFromMe(dist(distanceNm(me[0], me[1], pt[0], pt[1]), metric, S)),
+                color = palette.onSurface.copy(alpha = 0.6f), fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PinAction(S.copy, palette, Modifier.weight(1f), onCopy)
+            PinAction(S.radarShare, palette, Modifier.weight(1f), onShare)
+        }
+    }
+}
+
+@Composable
+private fun PinAction(label: String, palette: AbyssPalette, modifier: Modifier, onClick: () -> Unit) {
+    Box(modifier.clip(RoundedCornerShape(12.dp)).background(palette.surfaceVariant).clickable(onClick = onClick)
+        .padding(vertical = 11.dp), contentAlignment = Alignment.Center) {
+        Text(label, color = palette.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -538,14 +1010,14 @@ private fun FilterChip(label: String, selected: Boolean, palette: AbyssPalette, 
 }
 
 @Composable
-private fun RoundButton(icon: ImageVector, desc: String, palette: AbyssPalette, onClick: () -> Unit) {
+private fun RoundButton(icon: ImageVector, desc: String, palette: AbyssPalette, active: Boolean = false, onClick: () -> Unit) {
     Box(
         Modifier.size(46.dp).clip(CircleShape)
-            .background(palette.surface.copy(alpha = 0.94f))
-            .border(1.dp, palette.outline, CircleShape)
+            .background(if (active) palette.primary else palette.surface.copy(alpha = 0.94f))
+            .border(1.dp, if (active) palette.primary else palette.outline, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, desc, tint = palette.onSurface.copy(alpha = 0.85f), modifier = Modifier.size(21.dp)) }
+    ) { Icon(icon, desc, tint = if (active) palette.onPrimary else palette.onSurface.copy(alpha = 0.85f), modifier = Modifier.size(21.dp)) }
 }
 
 @Composable
