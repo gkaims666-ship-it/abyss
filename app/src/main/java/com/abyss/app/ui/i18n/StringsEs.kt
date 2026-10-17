@@ -356,4 +356,7 @@ object StringsEs : Strings() {
     override val radarOverlayEvents = "Eventos"
     override val radarEventQuake = "Terremoto"
     override val radarEventNews = "Noticia"
+
+    // ---- radar: day/night terminator
+    override val radarOverlayTerminator = "Día / noche"
 }

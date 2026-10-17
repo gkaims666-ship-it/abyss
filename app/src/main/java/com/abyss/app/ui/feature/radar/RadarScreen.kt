@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
+import android.graphics.BitmapFactory
 import android.graphics.drawable.ShapeDrawable
 import android.graphics.drawable.shapes.OvalShape
 import android.net.Uri
@@ -21,6 +22,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -48,6 +50,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.MyLocation
@@ -78,12 +81,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -97,6 +103,9 @@ import androidx.core.content.ContextCompat
 import com.abyss.app.feature.radar.BaseLayer
 import com.abyss.app.feature.radar.GeoApi
 import com.abyss.app.feature.radar.MapEvent
+import com.abyss.app.feature.radar.PlanePhoto
+import com.abyss.app.feature.radar.SunCalc
+import com.abyss.app.feature.radar.parseLatLon
 import com.abyss.app.feature.radar.Place
 import com.abyss.app.feature.radar.Plane
 import com.abyss.app.feature.radar.WikiPlace
@@ -124,6 +133,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.FolderOverlay
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.TilesOverlay
 import org.osmdroid.events.MapEventsReceiver
@@ -171,6 +181,9 @@ private class RadarController(private val app: Context, private val scope: Corou
     var weatherOn by mutableStateOf(false)
     var wikiOn by mutableStateOf(false)
     var eventsOn by mutableStateOf(false)
+    var terminatorOn by mutableStateOf(false)
+    var photo by mutableStateOf<PlanePhoto?>(null)
+    var photoBitmap by mutableStateOf<ImageBitmap?>(null)
     var selectedEvent by mutableStateOf<MapEvent?>(null)
     var planesOn by mutableStateOf(true)
     var sheetOpen by mutableStateOf(false)
@@ -210,6 +223,9 @@ private class RadarController(private val app: Context, private val scope: Corou
     private var wikiAt = 0L
     private var eventsFolder: FolderOverlay? = null
     private var eventsAt = 0L
+    private var terminator: Polygon? = null
+    private var terminatorAt = 0L
+    private var photoJob: kotlinx.coroutines.Job? = null
 
     // ------------------------------------------------------------ map
 
@@ -318,6 +334,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         }
         val o = mv.mapOrientation
         if (kotlin.math.abs(o - orientation) > 0.4f) orientation = o
+        if (terminatorOn && System.currentTimeMillis() - terminatorAt > 60_000L) refreshTerminator()
         mv.invalidate()
     }
 
@@ -407,6 +424,20 @@ private class RadarController(private val app: Context, private val scope: Corou
         selected = p
         route = null
         if (p == null) following = false
+        photo = null; photoBitmap = null
+        photoJob?.cancel()
+        if (p != null) {
+            photoJob = scope.launch {
+                val ph = runCatching { GeoApi.planePhoto(p.hex) }.getOrNull()
+                if (selected?.hex != p.hex) return@launch
+                photo = ph
+                if (ph != null) {
+                    val bytes = runCatching { GeoApi.fetchBytes(ph.thumbUrl) }.getOrNull()
+                    val bmp = bytes?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
+                    if (selected?.hex == p.hex) photoBitmap = bmp?.asImageBitmap()
+                }
+            }
+        }
         push()
         val cs = p?.callsign ?: return
         if (routeCache.containsKey(cs)) { route = routeCache[cs]; push(); return }
@@ -547,7 +578,8 @@ private class RadarController(private val app: Context, private val scope: Corou
             val m = Marker(mv)
             m.position = GeoPoint(e.lat, e.lon)
             m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-            m.icon = dot(if (e.kind == MapEvent.Kind.Quake) 0xFFE5484D.toInt() else 0xFFF0A84C.toInt())
+            val sizeDp = if (e.kind == MapEvent.Kind.Quake) (9f + 2.4f * (e.mag ?: 3.0)).toFloat().coerceIn(10f, 30f) else 13f
+            m.icon = dot(if (e.kind == MapEvent.Kind.Quake) 0xFFE5484D.toInt() else 0xFFF0A84C.toInt(), sizeDp)
             m.relatedObject = e
             m.setOnMarkerClickListener { mk, _ ->
                 select(null); clearPin()
@@ -561,13 +593,41 @@ private class RadarController(private val app: Context, private val scope: Corou
     }
 
     /** A small filled circle used as an event marker. */
-    private fun dot(color: Int): ShapeDrawable {
-        val px = (app.resources.displayMetrics.density * 13f).toInt()
+    private fun dot(color: Int, sizeDp: Float = 13f): ShapeDrawable {
+        val px = (app.resources.displayMetrics.density * sizeDp).toInt()
         return ShapeDrawable(OvalShape()).apply {
             intrinsicWidth = px; intrinsicHeight = px
             paint.color = color
             paint.setShadowLayer(px * 0.25f, 0f, 0f, 0x80000000.toInt())
         }
+    }
+
+    fun toggleTerminator() {
+        terminatorOn = !terminatorOn
+        if (terminatorOn) { terminatorAt = 0L; refreshTerminator() } else removeTerminator()
+    }
+
+    private fun refreshTerminator() {
+        val mv = map ?: return
+        terminatorAt = System.currentTimeMillis()
+        val pts = SunCalc.nightPolygon().map { GeoPoint(it[0], it[1]) }
+        removeTerminator()
+        if (pts.isEmpty()) return
+        val poly = Polygon()
+        poly.points = pts
+        poly.fillPaint.color = 0x40000B1E
+        poly.outlinePaint.color = 0x55386A8C
+        poly.outlinePaint.strokeWidth = 1.5f
+        terminator = poly
+        mv.overlays.add(0, poly)
+        mv.invalidate()
+    }
+
+    private fun removeTerminator() {
+        val mv = map ?: return
+        terminator?.let { mv.overlays.remove(it) }
+        terminator = null
+        mv.invalidate()
     }
 
     fun openUrl(url: String?) {
@@ -656,6 +716,15 @@ private class RadarController(private val app: Context, private val scope: Corou
             placeResults = runCatching { GeoApi.searchPlaces(t, lang) }.getOrDefault(emptyList())
             searching = false
         }
+    }
+
+    /** If [q] is a coordinate, jump+pin and return true; else let the caller search. */
+    fun goToQuery(q: String, lang: String): Boolean {
+        val c = parseLatLon(q) ?: return false
+        placeResults = null
+        map?.controller?.animateTo(GeoPoint(c.lat, c.lon), 13.0, 800L)
+        dropPin(c.lat, c.lon, lang)
+        return true
     }
 
     fun focusPlace(place: Place, lang: String) {
@@ -801,7 +870,8 @@ fun RadarScreen(palette: AbyssPalette) {
                         cursorBrush = SolidColor(palette.primary),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = {
-                            if (places) ctl.searchPlaces(query, S.code) else ctl.search(query)
+                            if (places) { if (!ctl.goToQuery(query, S.code)) ctl.searchPlaces(query, S.code) }
+                            else ctl.search(query)
                             focusManager.clearFocus()
                         }),
                         modifier = Modifier.fillMaxWidth(),
@@ -867,7 +937,8 @@ fun RadarScreen(palette: AbyssPalette) {
             }
             val sel = ctl.selected
             AnimatedVisibility(sel != null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
-                if (sel != null) PlaneCard(sel, ctl.route, ctl.following, ctl.metric, palette, S,
+                if (sel != null) PlaneCard(sel, ctl.route, ctl.following, ctl.metric, ctl.photoBitmap, ctl.photo, palette, S,
+                    onOpenPhoto = { ctl.openUrl(ctl.photo?.link) },
                     onFollow = { ctl.following = !ctl.following },
                     onClose = { ctl.select(null) })
             }
@@ -939,6 +1010,7 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) 
         }
         ToggleRow(Icons.Filled.MenuBook, S.radarOverlayWiki, ctl.wikiOn, palette) { ctl.toggleWiki() }
         ToggleRow(Icons.Filled.Bolt, S.radarOverlayEvents, ctl.eventsOn, palette) { ctl.toggleEvents() }
+        ToggleRow(Icons.Filled.DarkMode, S.radarOverlayTerminator, ctl.terminatorOn, palette) { ctl.toggleTerminator() }
         ToggleRow(Icons.Filled.Umbrella, S.radarOverlayWeather, ctl.weatherOn, palette) { ctl.toggleWeather() }
         Spacer(Modifier.height(6.dp))
     }
@@ -1167,7 +1239,8 @@ private fun SearchResults(list: List<Plane>, searching: Boolean, palette: AbyssP
 @Composable
 private fun PlaneCard(
     p: Plane, route: Route?, following: Boolean, metric: Boolean,
-    palette: AbyssPalette, S: Strings, onFollow: () -> Unit, onClose: () -> Unit,
+    photoBitmap: ImageBitmap?, photo: PlanePhoto?,
+    palette: AbyssPalette, S: Strings, onOpenPhoto: () -> Unit, onFollow: () -> Unit, onClose: () -> Unit,
 ) {
     // Re-evaluated every second so the live position / progress move.
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -1182,6 +1255,18 @@ private fun PlaneCard(
             .border(1.dp, palette.outline, RoundedCornerShape(22.dp))
             .padding(16.dp),
     ) {
+        if (photoBitmap != null) {
+            Box(Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = onOpenPhoto)) {
+                Image(photoBitmap, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                if (photo?.photographer != null) Text(
+                    "© ${photo.photographer} · Planespotters",
+                    color = Color.White.copy(alpha = 0.85f), fontSize = 9.sp,
+                    modifier = Modifier.align(Alignment.BottomEnd)
+                        .background(Color.Black.copy(alpha = 0.4f)).padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+        }
         // Header
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {

@@ -363,6 +363,9 @@ abstract class Strings {
     abstract val radarEventQuake: String
     abstract val radarEventNews: String
 
+    // ---- radar: day/night terminator
+    abstract val radarOverlayTerminator: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

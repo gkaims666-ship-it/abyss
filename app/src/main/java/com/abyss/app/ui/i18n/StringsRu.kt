@@ -356,4 +356,7 @@ object StringsRu : Strings() {
     override val radarOverlayEvents = "События"
     override val radarEventQuake = "Землетрясение"
     override val radarEventNews = "Новость"
+
+    // ---- radar: day/night terminator
+    override val radarOverlayTerminator = "День / ночь"
 }

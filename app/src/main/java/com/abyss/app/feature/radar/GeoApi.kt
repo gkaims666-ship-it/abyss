@@ -43,9 +43,13 @@ data class MapEvent(
     val lat: Double,
     val lon: Double,
     val timeMs: Long,
+    val mag: Double? = null,
 ) {
     enum class Kind { Quake, News }
 }
+
+/** A photo of an aircraft from Planespotters (free, attribution required). */
+data class PlanePhoto(val thumbUrl: String, val link: String, val photographer: String?)
 
 object GeoApi {
     private const val UA = "Abyss/1.0 (Android; com.abyss.app; contact: abyss-app@users.noreply.github.com)"
@@ -147,7 +151,7 @@ object GeoApi {
                             pr.s("title") ?: ("M " + (pr.d("mag") ?: 0.0)),
                             pr.s("place"),
                             pr.s("url"),
-                            la, lon, pr.l("time") ?: 0L,
+                            la, lon, pr.l("time") ?: 0L, pr.d("mag"),
                         )
                     }
                 }
@@ -182,6 +186,25 @@ object GeoApi {
             // Nearest first when a center is implied by the bounds.
             out.distinctBy { it.url ?: (it.title + it.lat) }.take(140)
         }
+
+    /** Best photo of an aircraft by ICAO hex, or null. */
+    suspend fun planePhoto(hex: String): PlanePhoto? = withContext(Dispatchers.IO) {
+        val text = get("https://api.planespotters.net/pub/photos/hex/" + enc(hex.lowercase())) ?: return@withContext null
+        val arr = runCatching { Http.json.parseToJsonElement(text).jsonObject["photos"] as? JsonArray }.getOrNull() ?: return@withContext null
+        val first = arr.firstOrNull() as? JsonObject ?: return@withContext null
+        val thumb = (first["thumbnail_large"] as? JsonObject)?.s("src")
+            ?: (first["thumbnail"] as? JsonObject)?.s("src") ?: return@withContext null
+        PlanePhoto(thumb, first.s("link") ?: "https://www.planespotters.net", first.s("photographer"))
+    }
+
+    /** Raw bytes of a URL (used to decode photo thumbnails off the UI thread). */
+    suspend fun fetchBytes(url: String): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching {
+            client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+                if (r.isSuccessful) r.body?.bytes() else null
+            }
+        }.getOrNull()
+    }
 
     private fun get(url: String): String? = runCatching {
         client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->

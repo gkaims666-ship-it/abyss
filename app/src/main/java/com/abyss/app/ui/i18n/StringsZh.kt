@@ -356,4 +356,7 @@ object StringsZh : Strings() {
     override val radarOverlayEvents = "事件"
     override val radarEventQuake = "地震"
     override val radarEventNews = "新闻"
+
+    // ---- radar: day/night terminator
+    override val radarOverlayTerminator = "昼夜"
 }
