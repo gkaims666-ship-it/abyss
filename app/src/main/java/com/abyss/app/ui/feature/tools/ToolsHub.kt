@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.tools
 
+import com.abyss.app.ui.components.fadeLayer
+
 import com.abyss.app.ui.background.abyssObstacle
 
 import androidx.activity.compose.BackHandler
@@ -89,19 +91,21 @@ fun ToolsHub(palette: AbyssPalette) {
     AnimatedContent(
         targetState = open,
         transitionSpec = {
+            // Slides only; fades come from fadeLayer() (per-op alpha, no offscreen layer).
             if (targetState != null)
-                (slideInHorizontally(tween(280)) { it / 3 } + fadeIn(tween(280)))
-                    .togetherWith(fadeOut(tween(160)))
+                slideInHorizontally(tween(280)) { it / 3 }
+                    .togetherWith(slideOutHorizontally(tween(160)) { 0 })
             else
-                (fadeIn(tween(280)))
-                    .togetherWith(slideOutHorizontally(tween(260)) { it / 3 } + fadeOut(tween(200)))
+                slideInHorizontally(tween(280)) { 0 }
+                    .togetherWith(slideOutHorizontally(tween(260)) { it / 3 })
         },
         label = "tool",
     ) { current ->
+        val fade = if (current == null) fadeLayer(280, 200) else fadeLayer(280, 160)
         if (current == null) {
-            HubGrid(palette) { open = it }
+            Box(fade) { HubGrid(palette) { open = it } }
         } else {
-            Column(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().then(fade)) {
                 BackBar(current.title(LocalStrings.current), palette) { open = null }
                 Box(Modifier.fillMaxSize()) {
                     when (current) {

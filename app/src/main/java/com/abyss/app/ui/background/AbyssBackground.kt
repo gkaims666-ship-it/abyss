@@ -66,6 +66,8 @@ import kotlin.random.Random
 private const val TAU = (2.0 * PI).toFloat()
 private const val CHARGE_DELAY_NS = 380_000_000L
 private const val CHARGE_FULL_NS = 1_100_000_000L
+/** Elements whose exact outline the shader draws (must match MAXO in the shaders). */
+private const val MAX_OBS = 40
 
 // ============================================================ model
 
@@ -102,6 +104,10 @@ class AbyssBackgroundState {
     internal var water = WaterSnapshot()
     internal val sparks = ArrayList<Spark>()
     internal val gpu = WaterGpu()
+    /** Exact element outlines for the shaders: (cx, cy, halfW, halfH) and (radius, mode, 0, 0). */
+    internal val obsA = FloatArray(MAX_OBS * 4)
+    internal val obsB = FloatArray(MAX_OBS * 4)
+    internal var obsN = 0
     private val rnd = Random(3)
 
     var frameNanos by mutableLongStateOf(0L)
@@ -186,6 +192,22 @@ class AbyssBackgroundState {
             abs(o.b - b) > 0.5f || o.radius != radius) {
             o.l = l; o.t = t; o.r = r; o.b = b; o.radius = radius; obstaclesDirty = true
         }
+    }
+
+    /** Packs the current element rectangles + their water modes for the shaders. */
+    internal fun packObstacles(t: Float) {
+        var n = 0
+        for (o in obstacles.values) {
+            if (n == MAX_OBS) break
+            val hw = (o.r - o.l) * 0.5f
+            val hh = (o.b - o.t) * 0.5f
+            if (hw < 1f || hh < 1f) continue
+            val i = n * 4
+            obsA[i] = o.l + hw; obsA[i + 1] = o.t + hh; obsA[i + 2] = hw; obsA[i + 3] = hh
+            obsB[i] = o.radius.coerceAtMost(minOf(hw, hh)); obsB[i + 1] = obstacleMode(o.seed, t).toFloat()
+            n++
+        }
+        obsN = n
     }
 
     internal fun removeObstacle(key: Any) {
@@ -282,13 +304,9 @@ fun Modifier.abyssTouchWaves(state: AbyssBackgroundState): Modifier = pointerInp
 
 // ============================================================ glyph field
 
-private val GLYPHS = arrayOf(
-    "0", "1", "{", "}", "<", ">", "/", "λ", "Σ", "∞", "#", "*", "+", "~", "·", "∴",
-    "◇", "≈", "∂", "∇", "Ω", "π", "=>", "fn", "::", "[]", "()", "&&", "|>", "%", "\$", "@",
-    "∫", "√", "≠", "∆", "μ", "ψ", "φ", "θ", "⊕", "⌘", "01", "10", "<>", "//", "^", "?",
-    "ξ", "ζ", "η", "β", "α", "γ", "δ", "ε", "κ", "ρ", "σ", "τ", "χ", "ω", "∑", "∏",
-    "≡", "≤", "≥", "→", "←", "↯", "⊗", "∅", "∈", "∀", "∃", "⟨⟩", "0x", "ff", "!=", "->",
-)
+/** English letters and binary digits only. */
+private val GLYPHS: Array<String> =
+    (('A'..'Z') + ('a'..'z') + listOf('0', '1', '0', '1')).map { it.toString() }.toTypedArray()
 private val LAYER_SIZE = floatArrayOf(9f, 12.5f, 17f)
 
 private class Glyph(
@@ -299,15 +317,59 @@ private class Glyph(
     val seed: Int, val periodNs: Long, val offsetNs: Long,
 )
 
-/** Native text paints, one per depth layer (drawText through the platform canvas is batched by the GPU glyph cache). */
-private class GlyphPaints {
-    val paints = Array(3) {
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE }
-    }
+/**
+ * Every glyph of every layer pre-rendered once into a small white atlas; each
+ * frame the whole field is then ONE drawVertices call (tinted per vertex)
+ * instead of ~900 separate drawText operations on the UI thread.
+ */
+private class GlyphAtlas(maxGlyphs: Int) {
+    val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     var px = -1f
+    val cellW = FloatArray(3)
+    val cellH = FloatArray(3)
+    val rowY = FloatArray(3)
+    val ascent = FloatArray(3)
+    val textSize = FloatArray(3)
+    val pad = 2f
+    val verts = FloatArray(maxGlyphs * 8)
+    val texs = FloatArray(maxGlyphs * 8)
+    // Sized generously: some Android versions range-check colors against vertexCount.
+    val colors = IntArray(maxGlyphs * 8)
+    val indices = ShortArray(maxGlyphs * 6).also { idx ->
+        for (g in 0 until maxGlyphs) {
+            val v = (g * 4).toShort(); val o = g * 6
+            idx[o] = v; idx[o + 1] = (v + 1).toShort(); idx[o + 2] = (v + 2).toShort()
+            idx[o + 3] = v; idx[o + 4] = (v + 2).toShort(); idx[o + 5] = (v + 3).toShort()
+        }
+    }
     // Palette colours as packed RGB, refreshed when the palette changes.
     var paletteKey: AbyssPalette? = null
     var symbol = 0; var secondary = 0; var wave = 0
+
+    fun build(pxPerSp: Float) {
+        px = pxPerSp
+        val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE; color = -0x1 }
+        var y = 0f
+        var width = 0f
+        for (i in 0 until 3) {
+            tp.textSize = LAYER_SIZE[i] * pxPerSp
+            val fm = tp.fontMetrics
+            textSize[i] = tp.textSize
+            ascent[i] = fm.ascent
+            cellW[i] = kotlin.math.ceil(tp.measureText("W")) + pad * 2f
+            cellH[i] = kotlin.math.ceil(fm.descent - fm.ascent) + pad * 2f
+            rowY[i] = y
+            y += cellH[i]
+            width = max(width, cellW[i] * GLYPHS.size)
+        }
+        val bmp = Bitmap.createBitmap(kotlin.math.ceil(width).toInt() + 1, kotlin.math.ceil(y).toInt() + 1, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        for (i in 0 until 3) {
+            tp.textSize = textSize[i]
+            for (j in GLYPHS.indices) c.drawText(GLYPHS[j], j * cellW[i] + pad, rowY[i] + pad - ascent[i], tp)
+        }
+        paint.shader = BitmapShader(bmp, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+    }
 }
 
 /**
@@ -329,7 +391,7 @@ fun AbyssAnimatedBackground(
     val shader = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) RuntimeShader(WATER_SRC) else null
     }
-    val gp = remember { GlyphPaints() }
+    val atlas = remember(glyphCount) { GlyphAtlas(glyphCount) }
     val slope = remember { FloatArray(2) }
     // Plain holders, not snapshot state: written every frame, never observed.
     val clock = remember { LongArray(3) }      // [0] last frame, [1] next ambient drop, [2] last water generation
@@ -452,7 +514,7 @@ fun AbyssAnimatedBackground(
         state.viewH = size.height
         val now = state.frameNanos
         drawWater(palette, shader, state, now)
-        drawGlyphs(palette, glyphs, gp, slope, now, state, dim)
+        drawGlyphs(palette, glyphs, atlas, slope, now, state, dim)
     }
 }
 
@@ -580,6 +642,10 @@ private fun DrawScope.drawWater(
         shader.setFloatUniform("uAccent", palette.wave.red, palette.wave.green, palette.wave.blue)
         shader.setFloatUniform("uAccent2", palette.secondary.red, palette.secondary.green, palette.secondary.blue)
         shader.setFloatUniform("uDark", if (palette.dark) 1f else 0f)
+        state.packObstacles(state.timeSec(now))
+        shader.setFloatUniform("uObs", state.obsA)
+        shader.setFloatUniform("uObsB", state.obsB)
+        shader.setFloatUniform("uObsN", state.obsN.toFloat())
         drawRect(ShaderBrush(shader))
     } else {
         drawRect(palette.background)
@@ -649,9 +715,7 @@ private fun DrawScope.drawOverCrests(
         if (obstacleMode(o.seed, t) != MODE_OVER) continue
         if (brush == null) {
             val fs = gpu.fieldShader!!
-            val ws = gpu.wallShader!!
             if (bound[0] !== fs) { shader.setInputShader("uField", fs); bound[0] = fs }
-            if (bound[1] !== ws) { shader.setInputShader("uWall", ws); bound[1] = ws }
             shader.setFloatUniform("uCell", water.cell)
             shader.setFloatUniform("uTime", (now % 3_600_000_000_000L) / 1_000_000_000f)
             shader.setFloatUniform("uAccent", palette.wave.red, palette.wave.green, palette.wave.blue)
@@ -678,19 +742,16 @@ private fun mixRgb(a: Int, b: Int, f: Float): Int {
 }
 
 private fun DrawScope.drawGlyphs(
-    palette: AbyssPalette, glyphs: Array<Glyph>, gp: GlyphPaints, slope: FloatArray,
+    palette: AbyssPalette, glyphs: Array<Glyph>, at: GlyphAtlas, slope: FloatArray,
     now: Long, state: AbyssBackgroundState, dim: Float,
 ) {
     val px = 1.sp.toPx()
-    if (px != gp.px) {
-        gp.px = px
-        for (i in 0 until 3) gp.paints[i].textSize = LAYER_SIZE[i] * px
-    }
-    if (gp.paletteKey !== palette) {
-        gp.paletteKey = palette
-        gp.symbol = palette.symbol.toArgb() and 0xFFFFFF
-        gp.secondary = palette.secondary.toArgb() and 0xFFFFFF
-        gp.wave = palette.wave.toArgb() and 0xFFFFFF
+    if (px != at.px) at.build(px)
+    if (at.paletteKey !== palette) {
+        at.paletteKey = palette
+        at.symbol = palette.symbol.toArgb() and 0xFFFFFF
+        at.secondary = palette.secondary.toArgb() and 0xFFFFFF
+        at.wave = palette.wave.toArgb() and 0xFFFFFF
     }
     val t = (now % 3_600_000_000_000L) / 1_000_000_000f
     val charge = state.chargeLevel(now)
@@ -700,60 +761,86 @@ private fun DrawScope.drawGlyphs(
     val hView = size.height
     val n = GLYPHS.size
     val dimK = 0.55f * dim
+    val verts = at.verts
+    val texs = at.texs
+    val colors = at.colors
+    var count = 0
 
-    drawIntoCanvas { canvas ->
-        val nc = canvas.nativeCanvas
-        for (g in glyphs) {
-            val depth = 1f + g.layer
-            // Flow field + sway + tilt parallax (near layers move more).
-            var x = g.x * w +
-                sin(t * (0.25f + g.layer * 0.12f) + g.phase) * g.sway +
-                sin(g.y * 0.0032f + t * 0.22f + g.layer) * 9f * depth +
-                state.tiltX * (5f + g.layer * 10f)
-            var y = g.y + cos(g.x * 6.0f + t * 0.18f) * 5f * depth + state.tiltY * (4f + g.layer * 8f)
-            if (y < -30f || y > hView + 30f) continue
+    for (g in glyphs) {
+        val depth = 1f + g.layer
+        // Flow field + sway + tilt parallax (near layers move more).
+        var x = g.x * w +
+            sin(t * (0.25f + g.layer * 0.12f) + g.phase) * g.sway +
+            sin(g.y * 0.0032f + t * 0.22f + g.layer) * 9f * depth +
+            state.tiltX * (5f + g.layer * 10f)
+        var y = g.y + cos(g.x * 6.0f + t * 0.18f) * 5f * depth + state.tiltY * (4f + g.layer * 8f)
+        if (y < -30f || y > hView + 30f) continue
 
-            var glow = 0f
-            if (waterLive) {
-                // Glyphs float ON the water: slide down the slopes, light up on crests.
-                water.slopeAt(x, y, slope)
-                val push = 26f + g.layer * 20f
-                x -= slope[0] * push
-                y -= slope[1] * push
-                val hh = water.heightAt(x, y)
-                glow = (abs(hh) * 1.3f + (abs(slope[0]) + abs(slope[1])) * 2.2f).coerceAtMost(1f)
-            }
-            if (charge > 0f) {
-                val dx = state.chargePos.x - x
-                val dy = state.chargePos.y - y
-                val d = hypot(dx, dy).coerceAtLeast(1f)
-                val pull = charge * 26f * exp(-(d / 260f) * (d / 260f))
-                x += dx / d * pull; y += dy / d * pull
-                glow = max(glow, charge * 0.6f * exp(-(d / 200f) * (d / 200f)))
-            }
-
-            // Symbol re-roll: a new character every ~0.2 s, each glyph on its own beat.
-            val tt = now + g.offsetNs
-            val slot = (tt / g.periodNs).toInt()
-            val fresh = (tt % g.periodNs).toFloat() / g.periodNs   // 0 right after a change
-            var hs = slot * -0x61c88647 xor g.seed
-            hs = hs xor (hs ushr 15); hs *= 0x2c1b3c6d; hs = hs xor (hs ushr 12)
-            val shown = (hs ushr 1) % n
-
-            val band = sin((x * 0.7f + y) * 0.0032f - t * 0.55f)
-            val sheen = ((band - 0.80f) / 0.20f).coerceIn(0f, 1f)
-            val tw = sin(t * (0.6f + g.layer * 0.3f) + g.phase) * 0.5f + 0.5f
-
-            var alpha = g.baseAlpha * (0.4f + 0.6f * tw) + sheen * 0.12f + glow * 0.7f
-            if (fresh < 0.2f) alpha += 0.05f * (1f - fresh * 5f)    // a flicker on every change
-            alpha *= (1f - dimK * (1f - glow))
-            if (alpha < 0.012f) continue   // invisible → no draw call
-
-            val rgb = mixRgb(mixRgb(gp.symbol, gp.secondary, sheen * 0.85f), gp.wave, glow)
-            val paint = gp.paints[g.layer]
-            paint.color = ((alpha.coerceIn(0f, 1f) * 255f).toInt() shl 24) or rgb
-            nc.drawText(GLYPHS[shown], x, y + paint.textSize * 0.8f, paint)
+        var glow = 0f
+        if (waterLive) {
+            // Glyphs float ON the water: slide down the slopes, light up on crests.
+            water.slopeAt(x, y, slope)
+            val push = 26f + g.layer * 20f
+            x -= slope[0] * push
+            y -= slope[1] * push
+            val hh = water.heightAt(x, y)
+            glow = (abs(hh) * 1.3f + (abs(slope[0]) + abs(slope[1])) * 2.2f).coerceAtMost(1f)
         }
+        if (charge > 0f) {
+            val dx = state.chargePos.x - x
+            val dy = state.chargePos.y - y
+            val d = hypot(dx, dy).coerceAtLeast(1f)
+            val pull = charge * 26f * exp(-(d / 260f) * (d / 260f))
+            x += dx / d * pull; y += dy / d * pull
+            glow = max(glow, charge * 0.6f * exp(-(d / 200f) * (d / 200f)))
+        }
+
+        // Symbol re-roll: a new character every ~0.2 s, each glyph on its own beat.
+        val tt = now + g.offsetNs
+        val slot = (tt / g.periodNs).toInt()
+        val fresh = (tt % g.periodNs).toFloat() / g.periodNs   // 0 right after a change
+        var hs = slot * -0x61c88647 xor g.seed
+        hs = hs xor (hs ushr 15); hs *= 0x2c1b3c6d; hs = hs xor (hs ushr 12)
+        val shown = (hs ushr 1) % n
+
+        val band = sin((x * 0.7f + y) * 0.0032f - t * 0.55f)
+        val sheen = ((band - 0.80f) / 0.20f).coerceIn(0f, 1f)
+        val tw = sin(t * (0.6f + g.layer * 0.3f) + g.phase) * 0.5f + 0.5f
+
+        var alpha = g.baseAlpha * (0.4f + 0.6f * tw) + sheen * 0.12f + glow * 0.75f
+        if (fresh < 0.2f) alpha += 0.05f * (1f - fresh * 5f)    // a flicker on every change
+        alpha *= (1f - dimK * (1f - glow))
+        if (alpha < 0.012f) continue   // invisible → not emitted
+
+        val rgb = mixRgb(mixRgb(at.symbol, at.secondary, sheen * 0.85f), at.wave, glow)
+        val argb = ((alpha.coerceIn(0f, 1f) * 255f).toInt() shl 24) or rgb
+
+        val L = g.layer
+        val cw = at.cellW[L]
+        val ch = at.cellH[L]
+        val left = x - at.pad
+        val top = y + at.textSize[L] * 0.8f + at.ascent[L] - at.pad
+        val u0 = shown * cw
+        val v0 = at.rowY[L]
+        val o = count * 8
+        verts[o] = left; verts[o + 1] = top
+        verts[o + 2] = left + cw; verts[o + 3] = top
+        verts[o + 4] = left + cw; verts[o + 5] = top + ch
+        verts[o + 6] = left; verts[o + 7] = top + ch
+        texs[o] = u0; texs[o + 1] = v0
+        texs[o + 2] = u0 + cw; texs[o + 3] = v0
+        texs[o + 4] = u0 + cw; texs[o + 5] = v0 + ch
+        texs[o + 6] = u0; texs[o + 7] = v0 + ch
+        val co = count * 4
+        colors[co] = argb; colors[co + 1] = argb; colors[co + 2] = argb; colors[co + 3] = argb
+        count++
+    }
+    if (count == 0) return
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawVertices(
+            android.graphics.Canvas.VertexMode.TRIANGLES, count * 8, verts, 0, texs, 0,
+            colors, 0, at.indices, 0, count * 6, at.paint,
+        )
     }
 }
 
@@ -811,12 +898,13 @@ private fun DrawScope.drawCharge(palette: AbyssPalette, state: AbyssBackgroundSt
 // ============================================================ shaders
 
 /**
- * The aurora seen through the water. uField: R = height, G/B = slope (soft-
- * compressed bytes, bilinear-filtered); uWall: R = solid element, G = element
- * the water rolls over, B = element the water slips under. Light comes from
- * refraction of the aurora, a specular glint off the surface normal, crest
- * brightening, foam where fronts pile up, a bright line along steep fronts and
- * a rim glow on solid edges proportional to how hard the water is hitting them.
+ * The aurora seen through luminescent water. uField: R = height, G/B = slope
+ * (soft-compressed bytes, bilinear-filtered); uWall: R = wall cell, G = "near
+ * an element" gate. Element outlines are NOT taken from the coarse grid: the
+ * exact rounded rectangles arrive as uniforms (uObs/uObsB), so rims are drawn
+ * per pixel along the real shape — no staircase. Light: refraction of the
+ * aurora, emissive crests and fronts, a soft bloom, foam where fronts stack,
+ * specular glints, and a glowing contour where water hits a solid element.
  */
 private const val WATER_SRC = """
 uniform float2 uRes;
@@ -829,10 +917,20 @@ uniform float3 uAccent2;
 uniform float uDark;
 uniform shader uField;
 uniform shader uWall;
+uniform float4 uObs[40];
+uniform float4 uObsB[40];
+uniform float uObsN;
 
 float dec(float s) {
     float e = s * 2.0 - 1.0;
     return e / max(1.0 - abs(e), 0.02);
+}
+
+float energyAt(float2 c) {
+    float4 f = float4(uField.eval(c));
+    float h = dec(f.r);
+    float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
+    return clamp(abs(h) * 2.4 + length(g) * 3.4, 0.0, 1.0);
 }
 
 half4 main(float2 p) {
@@ -841,12 +939,37 @@ half4 main(float2 p) {
     float4 f = float4(uField.eval(c));
     float h = dec(f.r);
     float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
-    float4 wl = float4(uWall.eval(c));
-    float solid = wl.r;
-    float under = wl.b;
     float slope = length(g);
+    float gate = float(uWall.eval(c).g);
 
-    // Aurora, refracted by the surface slope.
+    // ---- exact element outlines (only near elements: the gate keeps this cheap)
+    float dist = 1e4;
+    float mode = 0.0;
+    float2 nrm = float2(0.0);
+    if (gate > 0.002) {
+        for (int i = 0; i < 40; i++) {
+            if (float(i) >= uObsN) break;
+            float4 o = uObs[i];
+            float2 dp = p - o.xy;
+            float2 ad = abs(dp) - o.zw;
+            if (max(ad.x, ad.y) > 48.0) continue;
+            float r = uObsB[i].x;
+            float2 q = ad + float2(r);
+            float d = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+            if (d < dist) {
+                dist = d;
+                mode = uObsB[i].y;
+                float2 sg = float2(dp.x < 0.0 ? -1.0 : 1.0, dp.y < 0.0 ? -1.0 : 1.0);
+                if (max(q.x, q.y) > 0.0) nrm = normalize(max(q, float2(0.0)) + float2(0.0001)) * sg;
+                else nrm = q.x > q.y ? float2(sg.x, 0.0) : float2(0.0, sg.y);
+            }
+        }
+    }
+    float insideAny = smoothstep(0.75, -0.75, dist);
+    float solidIn = mode < 1.5 ? insideAny : 0.0;
+    float underIn = (mode > 1.5 && mode < 2.5) ? insideAny : 0.0;
+
+    // ---- aurora, refracted by the surface slope
     float2 sp = p - g * 52.0 + uTilt * 36.0;
     float2 uv = sp / uRes;
     float t = uTime * 0.12;
@@ -857,37 +980,55 @@ half4 main(float2 p) {
     float breathe = 0.85 + 0.15 * sin(uTime * 0.35);
     float band = smoothstep(0.25, 0.95, 0.5 + 0.5 * fl) * breathe;
     float top = 1.0 - smoothstep(0.0, 0.85, uv.y);
-    float k = uDark > 0.5 ? 1.0 : 0.62;
+    float dark = uDark > 0.5 ? 1.0 : 0.0;
+    float k = dark > 0.5 ? 1.0 : 0.62;
     float3 col = mix(uBg, mix(uAccent, uAccent2, 0.5 + 0.5 * fl), band * (0.05 + 0.07 * top) * k);
 
-    // Surface light.
+    // ---- luminescent surface
     float3 n = normalize(float3(-g * 3.2, 1.0));
     float spec = pow(max(dot(n, float3(-0.32, -0.52, 0.79)), 0.0), 26.0);
-    float crest = smoothstep(0.015, 0.40, h);
+    float crest = smoothstep(0.012, 0.36, h);
     float trough = smoothstep(0.015, 0.40, -h);
-    float front = smoothstep(0.010, 0.14, slope);
+    float front = smoothstep(0.008, 0.12, slope);
     float energy = clamp(abs(h) * 2.2 + slope * 3.2, 0.0, 1.0);
-    float rim = clamp(solid * (1.0 - solid) * 4.0, 0.0, 1.0);
     float glint = 0.5 + 0.5 * sin(p.x * 0.045 + p.y * 0.03 + uTime * 2.4 + h * 6.0);
-    // Where crossing fronts stack up: broken, flickering foam.
     float grain = 0.5 + 0.5 * sin(p.x * 0.31 + sin(p.y * 0.27 + uTime * 3.1) * 2.0 + uTime * 5.0);
-    float foam = smoothstep(0.42, 0.95, h) * (0.55 + 0.45 * grain);
+    float foam = smoothstep(0.40, 0.92, h) * (0.55 + 0.45 * grain);
+    // Soft bloom: energy a couple of cells around, so bright fronts halo like phosphorescence.
+    float wide = (energyAt(c + float2(2.3, 0.0)) + energyAt(c - float2(2.3, 0.0)) +
+                  energyAt(c + float2(0.0, 2.3)) + energyAt(c - float2(0.0, 2.3))) * 0.25;
 
     float3 lit = mix(uAccent, uAccent2, clamp(0.5 + h * 0.9, 0.0, 1.0));
-    float a = crest * 0.22 + front * 0.15 * (0.6 + 0.4 * glint) + spec * 0.6 * energy + rim * energy * 0.85;
-    // Water slipping beneath an element runs darker and quieter at its edges.
-    a *= 1.0 - 0.45 * under;
-    col = mix(col, lit, clamp(a * k, 0.0, 0.78));
-    col = mix(col, mix(lit, float3(1.0), 0.55), clamp(foam * 0.55 * k, 0.0, 0.6));
-    col = mix(col, uBg * 0.6, (trough * 0.12 + under * 0.10) * k);
+    float3 glowC = lit * 1.2 + float3(0.06);
+    float emis = crest * 0.30 + front * 0.26 * (0.6 + 0.4 * glint) + spec * 0.65 * energy
+               + foam * 0.50 + wide * 0.20;
+    // Nothing glows inside a solid element; water slipping under one runs dim.
+    emis *= (1.0 - solidIn) * (1.0 - 0.55 * underIn);
+
+    // ---- glowing contour where the water strikes a solid element
+    if (mode < 1.5 && dist < 40.0) {
+        float2 pe = p + nrm * (max(-dist, 0.0) + uCell * 1.15);
+        float e = energyAt(pe / uCell + float2(1.0, 1.0));
+        float line = exp(-abs(dist) / 1.3);
+        float halo = exp(-max(dist, 0.0) / 7.0) * (1.0 - insideAny);
+        emis += (line * (0.10 + 1.15 * e) + halo * e * 0.65) * gate;
+    }
+
+    if (dark > 0.5) {
+        col += glowC * emis * 0.95;
+    } else {
+        col = mix(col, lit, clamp(emis * 0.75, 0.0, 0.8));
+    }
+    col = mix(col, uBg * 0.6, (trough * 0.12 + underIn * 0.10) * k);
+    col = min(col, float3(1.0));
     return half4(col.r, col.g, col.b, 1.0);
 }
 """
 
 /**
- * Crests rolling OVER an element: transparent except where the water is
- * actually moving, premultiplied output, masked by the "over" channel so the
- * edges of the zone feather out.
+ * Crests rolling OVER an element (drawn clipped to the element's own rounded
+ * shape, so the edge is exact): transparent except where the water moves,
+ * premultiplied, glowing like the water below.
  */
 private const val OVER_SRC = """
 uniform float uCell;
@@ -896,7 +1037,6 @@ uniform float3 uAccent;
 uniform float3 uAccent2;
 uniform float uDark;
 uniform shader uField;
-uniform shader uWall;
 
 float dec(float s) {
     float e = s * 2.0 - 1.0;
@@ -905,22 +1045,20 @@ float dec(float s) {
 
 half4 main(float2 p) {
     float2 c = p / uCell + float2(1.0, 1.0);
-    float over = float(uWall.eval(c).g);
-    if (over < 0.01) return half4(0.0);
     float4 f = float4(uField.eval(c));
     float h = dec(f.r);
     float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
     float slope = length(g);
     float3 n = normalize(float3(-g * 3.2, 1.0));
     float spec = pow(max(dot(n, float3(-0.32, -0.52, 0.79)), 0.0), 22.0);
-    float crest = smoothstep(0.02, 0.45, h);
-    float front = smoothstep(0.015, 0.16, slope);
+    float crest = smoothstep(0.02, 0.42, h);
+    float front = smoothstep(0.012, 0.14, slope);
     float glint = 0.5 + 0.5 * sin(p.x * 0.05 + p.y * 0.035 + uTime * 2.6 + h * 6.0);
     float energy = clamp(abs(h) * 2.0 + slope * 3.0, 0.0, 1.0);
-    float a = (crest * 0.26 + front * 0.22 * (0.6 + 0.4 * glint) + spec * 0.45 * energy) * over;
-    a = clamp(a * (uDark > 0.5 ? 1.0 : 0.75), 0.0, 0.55);
-    float3 col = mix(uAccent, uAccent2, clamp(0.5 + h * 0.9, 0.0, 1.0));
-    col = mix(col, float3(1.0), spec * 0.5);
+    float a = crest * 0.32 + front * 0.28 * (0.6 + 0.4 * glint) + spec * 0.5 * energy;
+    a = clamp(a * (uDark > 0.5 ? 1.0 : 0.75), 0.0, 0.65);
+    float3 col = mix(uAccent, uAccent2, clamp(0.5 + h * 0.9, 0.0, 1.0)) * 1.15 + float3(0.05);
+    col = min(mix(col, float3(1.0), spec * 0.5), float3(1.0));
     return half4(col.r * a, col.g * a, col.b * a, a);
 }
 """

@@ -61,8 +61,11 @@ fun CoreScreen(palette: AbyssPalette) {
     var models by remember { mutableStateOf<List<File>>(emptyList()) }
 
     suspend fun refresh() {
-        recent = ServiceLocator.memory.recent(12)
-        models = ServiceLocator.localModel.listModels()
+        // Database + file listing off the UI thread, so opening Core never hitches.
+        val (r, m) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ServiceLocator.memory.recent(12) to ServiceLocator.localModel.listModels()
+        }
+        recent = r; models = m
     }
     LaunchedEffectRefresh { refresh() }
 
@@ -134,7 +137,7 @@ fun CoreScreen(palette: AbyssPalette) {
             modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.size(8.dp))
         TextField(value = modelUrl, onValueChange = { modelUrl = it },
-            modifier = Modifier.fillMaxWidth(), singleLine = true,
+            modifier = Modifier.fillMaxWidth().abyssObstacle(12.dp), singleLine = true,
             placeholder = { Text("https://huggingface.co/…/model.Q4_K_M.gguf",
                 color = palette.onSurface.copy(alpha = 0.4f)) },
             shape = RoundedCornerShape(12.dp), colors = fieldColors(palette))

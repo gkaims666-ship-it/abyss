@@ -101,7 +101,7 @@ fun CalculatorScreen(palette: AbyssPalette) {
         // Current expression + live result
         Text(expr.ifBlank { "0" }, color = palette.onBackground, fontSize = 34.sp,
             fontFamily = FontFamily.Monospace, textAlign = TextAlign.End,
-            maxLines = 2, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+            maxLines = 2, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).abyssObstacle(10.dp))
         Text(if (result.isNotBlank()) "= $result" else "", color = palette.primary,
             fontSize = 20.sp, fontFamily = FontFamily.Monospace, textAlign = TextAlign.End,
             modifier = Modifier.fillMaxWidth())

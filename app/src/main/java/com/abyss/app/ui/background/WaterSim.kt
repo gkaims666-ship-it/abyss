@@ -46,10 +46,10 @@ private const val TAU_F = (2.0 * PI).toFloat()
 /** Fixed timestep → identical motion at 60/90/120 Hz. */
 private const val STEP_HZ = 150f
 private const val MAX_STEPS = 4
-private const val GRID_COLS = 92
-private const val C2_BASE = 0.21f
-private const val C2_MIN = 0.05f
-private const val C2_MAX = 0.34f
+private const val GRID_COLS = 116
+private const val C2_BASE = 0.30f
+private const val C2_MIN = 0.07f
+private const val C2_MAX = 0.46f
 private const val NONLINEAR = 0.30f
 private const val DAMPING = 0.9968f
 private const val DAMPING_SLOW = 0.9915f
@@ -90,7 +90,7 @@ internal class WaterSnapshot {
     var heights = FloatArray(0); private set
     /** ARGB per cell: R = height, G = ∂x, B = ∂y (soft-compressed bytes). */
     var pixels = IntArray(0); private set
-    /** ARGB per cell: R = solid, G = over, B = under. */
+    /** ARGB per cell: R = solid wall, G = near an element (gate for the exact-outline shader pass). */
     var wallPixels = IntArray(0); private set
     var wallVersion = -1
     var active = false
@@ -137,9 +137,6 @@ internal class WaterSnapshot {
         }
         val REST_PIXEL = (0xFF shl 24) or (128 shl 16) or (128 shl 8) or 128
         const val OPEN_PIXEL = -0x1000000              // opaque black
-        const val SOLID_PIXEL = -0x10000               // 0xFFFF0000
-        const val OVER_PIXEL = -0xff0100               // 0xFF00FF00
-        const val UNDER_PIXEL = -0xffff01              // 0xFF0000FF
     }
 }
 
@@ -174,6 +171,9 @@ internal class WaterSim {
     private var prev = FloatArray(0)
     private var kind = ByteArray(0)
     private var c2 = FloatArray(0)
+    /** Speed factor for half-covered edge cells (1 = free water). */
+    private var edgeK = FloatArray(0)
+    private var near = ByteArray(0)
     private var aniso = FloatArray(0)
     private var wallPixels = IntArray(0)
     private var wallVersion = 0
@@ -333,6 +333,7 @@ internal class WaterSim {
         val n = cols * rows
         cur = FloatArray(n); prev = FloatArray(n); kind = ByteArray(n)
         c2 = FloatArray(n); aniso = FloatArray(n); wallPixels = IntArray(n)
+        edgeK = FloatArray(n) { 1f }; near = ByteArray(n)
         for (y in 0 until rows) updateSpeedRow(y, simTime)
         cell = cl
         modes = IntArray(0)          // forces a wall rebuild
@@ -341,51 +342,76 @@ internal class WaterSim {
         ready = true
     }
 
+    /** 1 if (px, py) lies inside the rounded rect [o] (with corner radius [rad]). */
+    private fun inside(o: ObstacleSnap, rad: Float, px: Float, py: Float): Boolean {
+        if (px < o.l || px > o.r || py < o.t || py > o.b) return false
+        if (rad <= 0f) return true
+        val dx = max(max(o.l + rad - px, px - (o.r - rad)), 0f)
+        val dy = max(max(o.t + rad - py, py - (o.b - rad)), 0f)
+        return dx * dx + dy * dy <= rad * rad
+    }
+
+    /**
+     * Rasterises the elements with 4 sub-samples per cell, so the water's
+     * boundary follows the real outline instead of a staircase: mostly covered
+     * cells become walls / slow zones, half covered edge cells stay water but
+     * are slowed (wave fronts bend smoothly around the corner). The exact
+     * outline itself is drawn by the shader from the element rectangles.
+     */
     private fun rebuildWalls() {
         val c = cols
         val newKind = kind
-        // Remember which cells were solid so freshly covered water is removed.
         java.util.Arrays.fill(newKind, KIND_OPEN)
+        java.util.Arrays.fill(edgeK, 1f)
+        java.util.Arrays.fill(near, 0)
         for (x in 0 until c) { newKind[x] = KIND_SOLID; newKind[(rows - 1) * c + x] = KIND_SOLID }
         for (y in 0 until rows) { newKind[y * c] = KIND_SOLID; newKind[y * c + c - 1] = KIND_SOLID }
-        val half = cell * 0.5f
+        val q1 = cell * 0.25f
+        val q3 = cell * 0.75f
         for (k in obstacles.indices) {
             val o = obstacles[k]
             val w = o.r - o.l
             val h = o.b - o.t
-            if (w < cell * 0.6f || h < cell * 0.6f) continue
+            if (w < cell * 0.5f || h < cell * 0.5f) continue
             val mode = if (k < modes.size) modes[k] else MODE_SOLID
             val kd = when (mode) { MODE_UNDER -> KIND_UNDER; MODE_OVER -> KIND_OVER; else -> KIND_SOLID }
             val rad = min(o.radius, min(w, h) * 0.5f)
-            val x0 = max(1, (o.l / cell + 1f).toInt())
-            val x1 = min(c - 2, (o.r / cell + 1f).toInt())
-            val y0 = max(1, (o.t / cell + 1f).toInt())
-            val y1 = min(rows - 2, (o.b / cell + 1f).toInt())
+            // Gate for the shader's exact-outline pass: the element plus a 3-cell halo.
+            val gx0 = max(0, (o.l / cell - 2f).toInt()); val gx1 = min(c - 1, (o.r / cell + 4f).toInt())
+            val gy0 = max(0, (o.t / cell - 2f).toInt()); val gy1 = min(rows - 1, (o.b / cell + 4f).toInt())
+            for (y in gy0..gy1) { val row = y * c; for (x in gx0..gx1) near[row + x] = 1 }
+
+            val x0 = max(1, (o.l / cell).toInt()); val x1 = min(c - 2, (o.r / cell + 2f).toInt())
+            val y0 = max(1, (o.t / cell).toInt()); val y1 = min(rows - 2, (o.b / cell + 2f).toInt())
             for (y in y0..y1) {
-                val cy = (y - 1) * cell + half
-                if (cy < o.t || cy > o.b) continue
+                val top = (y - 1) * cell
                 val row = y * c
                 for (x in x0..x1) {
-                    val cx = (x - 1) * cell + half
-                    if (cx < o.l || cx > o.r) continue
-                    if (rad > 0f) {
-                        val dx = max(max(o.l + rad - cx, cx - (o.r - rad)), 0f)
-                        val dy = max(max(o.t + rad - cy, cy - (o.b - rad)), 0f)
-                        if (dx * dx + dy * dy > rad * rad) continue
-                    }
-                    // SOLID always wins over a permeable zone underneath it.
+                    val left = (x - 1) * cell
+                    var n = 0
+                    if (inside(o, rad, left + q1, top + q1)) n++
+                    if (inside(o, rad, left + q3, top + q1)) n++
+                    if (inside(o, rad, left + q1, top + q3)) n++
+                    if (inside(o, rad, left + q3, top + q3)) n++
+                    if (n == 0) continue
                     val i = row + x
-                    if (newKind[i] != KIND_SOLID) newKind[i] = kd
+                    if (n >= 3) {
+                        // SOLID always wins over a permeable zone underneath it.
+                        if (newKind[i] != KIND_SOLID) newKind[i] = kd
+                    } else if (newKind[i] == KIND_OPEN) {
+                        // Partly covered edge cell: still water, but slowed in proportion.
+                        val f = if (kd == KIND_SOLID) 1f - 0.28f * n else 1f - (1f - SLOW_ZONE) * 0.5f * n
+                        if (f < edgeK[i]) edgeK[i] = f
+                    }
                 }
             }
         }
         for (i in newKind.indices) {
-            when (newKind[i]) {
-                KIND_SOLID -> { cur[i] = 0f; prev[i] = 0f; wallPixels[i] = WaterSnapshot.SOLID_PIXEL }
-                KIND_OVER -> wallPixels[i] = WaterSnapshot.OVER_PIXEL
-                KIND_UNDER -> wallPixels[i] = WaterSnapshot.UNDER_PIXEL
-                else -> wallPixels[i] = WaterSnapshot.OPEN_PIXEL
-            }
+            val g = if (near[i].toInt() != 0) 0x0000FF00 else 0
+            if (newKind[i] == KIND_SOLID) {
+                cur[i] = 0f; prev[i] = 0f
+                wallPixels[i] = -0x1000000 or 0x00FF0000 or g
+            } else wallPixels[i] = -0x1000000 or g
         }
         wallVersion++
         active = true; quiet = 0
@@ -457,6 +483,7 @@ internal class WaterSim {
         val kd = kind
         val sp = c2
         val an = aniso
+        val ek = edgeK
         var peak = 0f
         for (y in 1 until rows - 1) {
             val row = y * c
@@ -470,7 +497,7 @@ internal class WaterSim {
                 val lap = (4f * (l + r + u + d) +
                     cu[i - c - 1] + cu[i - c + 1] + cu[i + c - 1] + cu[i + c + 1] - 20f * h) * (1f / 6f) +
                     an[i] * ((l + r) - (u + d))
-                var k = sp[i] * (1f + NONLINEAR * h)
+                var k = sp[i] * ek[i] * (1f + NONLINEAR * h)
                 if (k < C2_MIN) k = C2_MIN else if (k > C2_MAX) k = C2_MAX
                 var damp = DAMPING
                 if (kk != KIND_OPEN) { k *= SLOW_ZONE; damp = DAMPING_SLOW }

@@ -97,7 +97,7 @@ fun VpnScreen(palette: AbyssPalette) {
         Text(S.subscriptionUrl, color = palette.primary, fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace, fontSize = 14.sp)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextField(value = sub, onValueChange = { sub = it }, modifier = Modifier.weight(1f),
+            TextField(value = sub, onValueChange = { sub = it }, modifier = Modifier.weight(1f).abyssObstacle(12.dp),
                 singleLine = true, placeholder = { Text("https://…/sub",
                     color = palette.onSurface.copy(alpha = 0.4f)) },
                 shape = RoundedCornerShape(12.dp), colors = fieldColors(palette))
@@ -117,7 +117,7 @@ fun VpnScreen(palette: AbyssPalette) {
         Text(S.orPasteLinks, color = palette.onSurface.copy(alpha = 0.7f),
             fontSize = 12.sp)
         TextField(value = pasteLinks, onValueChange = { pasteLinks = it },
-            modifier = Modifier.fillMaxWidth(), placeholder = { Text(S.onePerLine,
+            modifier = Modifier.fillMaxWidth().abyssObstacle(12.dp), placeholder = { Text(S.onePerLine,
                 color = palette.onSurface.copy(alpha = 0.4f)) },
             shape = RoundedCornerShape(12.dp), colors = fieldColors(palette))
         Spacer(Modifier.size(8.dp))

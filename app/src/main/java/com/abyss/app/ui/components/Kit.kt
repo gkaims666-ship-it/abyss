@@ -2,7 +2,11 @@ package com.abyss.app.ui.components
 
 import com.abyss.app.ui.background.abyssObstacle
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -44,7 +48,7 @@ fun Modifier.blockTaps(): Modifier = pointerInput(Unit) { detectTapGestures { } 
 /** Large editorial screen title with optional muted subtitle. */
 @Composable
 fun ScreenTitle(title: String, palette: AbyssPalette, subtitle: String? = null, modifier: Modifier = Modifier) {
-    Column(modifier.padding(bottom = 14.dp)) {
+    Column(modifier.padding(bottom = 14.dp).abyssObstacle(10.dp)) {
         Text(title, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 30.sp, lineHeight = 36.sp)
         if (subtitle != null) {
             Spacer(Modifier.size(4.dp))
@@ -59,7 +63,7 @@ fun SectionLabel(text: String, palette: AbyssPalette, modifier: Modifier = Modif
     Text(
         text.uppercase(), color = palette.onSurface.copy(alpha = 0.5f),
         fontSize = 11.5.sp, letterSpacing = 1.4.sp, fontFamily = AbyssFonts.Ui,
-        modifier = modifier.padding(top = 22.dp, bottom = 10.dp, start = 2.dp),
+        modifier = modifier.padding(top = 22.dp, bottom = 10.dp, start = 2.dp).abyssObstacle(6.dp),
     )
 }
 
@@ -78,7 +82,8 @@ fun BackBar(title: String, palette: AbyssPalette, onBack: () -> Unit) {
                 modifier = Modifier.size(22.dp))
         }
         Spacer(Modifier.width(4.dp))
-        Text(title, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 24.sp)
+        Text(title, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 24.sp,
+            modifier = Modifier.abyssObstacle(8.dp))
     }
 }
 
@@ -91,5 +96,29 @@ fun Appear(delayMs: Int = 0, enabled: Boolean = true, content: @Composable () ->
         delay(delayMs.toLong())
         p.animateTo(1f, tween(420, easing = FastOutSlowInEasing))
     }
-    Box(Modifier.graphicsLayer { alpha = p.value; translationY = (1f - p.value) * 18f }) { content() }
+    // ModulateAlpha: fades by scaling each draw's alpha instead of rendering the
+    // whole section into an offscreen buffer every frame (that buffer was the
+    // main cost of opening Settings).
+    Box(Modifier.graphicsLayer {
+        alpha = p.value; translationY = (1f - p.value) * 18f
+        compositingStrategy = CompositingStrategy.ModulateAlpha
+    }) { content() }
+}
+
+/**
+ * Fade for AnimatedContent / AnimatedVisibility content, driven by the scope's
+ * own enter/exit transition. Same look as fadeIn/fadeOut, but alpha is applied
+ * per draw op (no full-screen offscreen layer) and the value is read only in
+ * the layer block, so the fade never recomposes the screen.
+ */
+@Composable
+fun AnimatedVisibilityScope.fadeLayer(enterMs: Int = 300, exitMs: Int = 180): Modifier {
+    val a = transition.animateFloat(
+        transitionSpec = { if (targetState == EnterExitState.Visible) tween(enterMs) else tween(exitMs) },
+        label = "fade",
+    ) { if (it == EnterExitState.Visible) 1f else 0f }
+    return Modifier.graphicsLayer {
+        alpha = a.value
+        compositingStrategy = CompositingStrategy.ModulateAlpha
+    }
 }

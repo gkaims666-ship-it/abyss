@@ -1,5 +1,7 @@
 package com.abyss.app.ui
 
+import com.abyss.app.ui.components.fadeLayer
+
 import com.abyss.app.ui.background.abyssObstacle
 
 import android.app.Activity
@@ -160,17 +162,20 @@ private fun AbyssRoot() {
                     targetState = tab,
                     transitionSpec = {
                         val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                        (slideInHorizontally(tween(300)) { it / 4 * dir } + fadeIn(tween(300)))
-                            .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 * dir } + fadeOut(tween(180)))
+                        // Slide only here; the fade is fadeLayer() below (no offscreen buffers).
+                        slideInHorizontally(tween(300)) { it / 4 * dir }
+                            .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 * dir })
                     },
                     modifier = Modifier.fillMaxSize().padding(bottom = inner.calculateBottomPadding()),
                     label = "tab",
                 ) { current ->
-                    when (current) {
-                        Tab.Chat -> ChatScreen(vm = vm, palette = palette, onOpenSettings = { tab = Tab.Settings })
-                        Tab.Tools -> Box(Modifier.fillMaxSize().statusBarsPadding()) { ToolsHub(palette = palette) }
-                        Tab.Settings -> Box(Modifier.fillMaxSize().statusBarsPadding()) {
-                            SettingsHost(vm = vm, palette = palette)
+                    Box(Modifier.fillMaxSize().then(fadeLayer(300, 180))) {
+                        when (current) {
+                            Tab.Chat -> ChatScreen(vm = vm, palette = palette, onOpenSettings = { tab = Tab.Settings })
+                            Tab.Tools -> Box(Modifier.fillMaxSize().statusBarsPadding()) { ToolsHub(palette = palette) }
+                            Tab.Settings -> Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                                SettingsHost(vm = vm, palette = palette)
+                            }
                         }
                     }
                 }

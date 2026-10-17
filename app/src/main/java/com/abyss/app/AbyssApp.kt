@@ -18,6 +18,8 @@ class AbyssApp : Application() {
         // saved UI language (defaults to the system language until this lands).
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
             runCatching { I18n.current = I18n.resolve(ServiceLocator.settings.settings.first().language) }
+            // Creating EncryptedSharedPreferences takes 100+ ms: never on the UI thread.
+            runCatching { ServiceLocator.keyStore.warmUp() }
         }
         // Register background self-improvement (the worker itself respects the
         // on/off toggle, so this is safe to schedule unconditionally).

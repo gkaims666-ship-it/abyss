@@ -1,5 +1,7 @@
 package com.abyss.app.ui.chat
 
+import com.abyss.app.ui.components.fadeLayer
+
 import com.abyss.app.ui.background.abyssObstacle
 
 import androidx.compose.animation.AnimatedContent
@@ -188,18 +190,20 @@ fun ChatScreen(
                 AnimatedContent(
                     targetState = empty,
                     transitionSpec = {
-                        (fadeIn(tween(380)) + slideInVertically(tween(380)) { it / 12 })
-                            .togetherWith(fadeOut(tween(220)))
+                        slideInVertically(tween(380)) { it / 12 }
+                            .togetherWith(slideOutVertically(tween(220)) { 0 })
                     },
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     label = "chat-mode",
                 ) { isEmpty ->
-                    if (isEmpty) {
-                        Hero(state = state, palette = palette, vm = vm,
-                            onCamera = { showCamera = true }, onModel = onOpenSettings)
-                    } else {
-                        Conversation(state = state, palette = palette, vm = vm,
-                            onCamera = { showCamera = true }, onModel = onOpenSettings)
+                    Box(Modifier.fillMaxSize().then(fadeLayer(380, 220))) {
+                        if (isEmpty) {
+                            Hero(state = state, palette = palette, vm = vm,
+                                onCamera = { showCamera = true }, onModel = onOpenSettings)
+                        } else {
+                            Conversation(state = state, palette = palette, vm = vm,
+                                onCamera = { showCamera = true }, onModel = onOpenSettings)
+                        }
                     }
                 }
             }
@@ -333,7 +337,7 @@ private fun Hero(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.abyssObstacle(16.dp), verticalAlignment = Alignment.CenterVertically) {
             AbyssMark(palette, size = 36.dp)
             Spacer(Modifier.width(12.dp))
             Text(
@@ -523,7 +527,7 @@ private fun AssistantMessage(
     LaunchedEffect(copied) { if (copied) { delay(1400); copied = false } }
 
     Column(Modifier.fillMaxWidth().animateContentSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.abyssObstacle(10.dp), verticalAlignment = Alignment.CenterVertically) {
             // Only the live reply animates its mark — dozens of spinning marks
             // in a long chat would just burn frames on a 120 Hz screen.
             AbyssMark(palette, size = 20.dp, pulse = msg.streaming, speedMs = 1600, animated = msg.streaming)
@@ -534,7 +538,7 @@ private fun AssistantMessage(
         }
         Spacer(Modifier.size(8.dp))
 
-        Box(Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClick = { menu = true })) {
+        Box(Modifier.fillMaxWidth().abyssObstacle(10.dp).combinedClickable(onClick = {}, onLongClick = { menu = true })) {
             when {
                 msg.error -> Text(body, color = palette.error, fontSize = 15.sp)
                 msg.streaming && body.isBlank() -> Thinking(palette)

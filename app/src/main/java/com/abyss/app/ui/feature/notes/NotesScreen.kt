@@ -91,7 +91,7 @@ fun NotesScreen(palette: AbyssPalette) {
             Spacer(Modifier.size(10.dp))
             TextField(
                 value = query, onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().abyssObstacle(12.dp),
                 placeholder = { Text(S.searchHint, color = palette.onSurface.copy(alpha = 0.4f)) },
                 shape = RoundedCornerShape(14.dp),
                 colors = fieldColors(palette), singleLine = true,

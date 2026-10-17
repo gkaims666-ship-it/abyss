@@ -1,5 +1,7 @@
 package com.abyss.app.ui.settings
 
+import com.abyss.app.ui.components.fadeLayer
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -12,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -41,18 +44,20 @@ fun SettingsHost(vm: ChatViewModel, palette: AbyssPalette) {
         targetState = route,
         transitionSpec = {
             if (targetState == SettingsRoute.Permissions)
-                (slideInHorizontally(tween(240)) { it } + fadeIn())
-                    .togetherWith(slideOutHorizontally(tween(240)) { -it / 3 } + fadeOut())
+                slideInHorizontally(tween(240)) { it }
+                    .togetherWith(slideOutHorizontally(tween(240)) { -it / 3 })
             else
-                (slideInHorizontally(tween(240)) { -it / 3 } + fadeIn())
-                    .togetherWith(slideOutHorizontally(tween(240)) { it } + fadeOut())
+                slideInHorizontally(tween(240)) { -it / 3 }
+                    .togetherWith(slideOutHorizontally(tween(240)) { it })
         },
         label = "settings",
     ) { current ->
+        val fade = fadeLayer(240, 240)
         when (current) {
-            SettingsRoute.Main -> SettingsScreen(vm, palette,
-                onOpenPermissions = { route = SettingsRoute.Permissions })
-            SettingsRoute.Permissions -> Column(Modifier.fillMaxSize()) {
+            SettingsRoute.Main -> Box(fade) {
+                SettingsScreen(vm, palette, onOpenPermissions = { route = SettingsRoute.Permissions })
+            }
+            SettingsRoute.Permissions -> Column(Modifier.fillMaxSize().then(fade)) {
                 com.abyss.app.ui.components.BackBar(com.abyss.app.ui.i18n.LocalStrings.current.permissions, palette) { route = SettingsRoute.Main }
                 PermissionsScreen(palette)
             }

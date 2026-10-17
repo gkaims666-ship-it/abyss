@@ -1,0 +1,23 @@
+name: Shader check
+
+on:
+  push:
+    paths:
+      - 'app/src/main/java/**/background/**'
+      - 'app/src/main/java/**/components/**'
+      - '.github/scripts/check-shaders.js'
+      - '.github/workflows/shader-check.yml'
+  workflow_dispatch:
+
+jobs:
+  agsl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Skia (CanvasKit)
+        run: npm install --no-save canvaskit-wasm@0.39.1
+      - name: Compile AGSL shaders
+        run: node .github/scripts/check-shaders.js
