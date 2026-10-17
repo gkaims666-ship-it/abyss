@@ -454,4 +454,11 @@ object StringsZh : Strings() {
     override val safetyOngoing = "现在"
     override val safetyMinShort = "分钟"
     override val safetyNotifBlocked = "通知已关闭 — 点按以允许"
+
+    // ---- vpn: speed test + sort
+    override val vpnTestAll = "测速"
+    override val vpnTesting = "测速中…"
+    override val vpnSortSpeed = "按速度"
+    override val vpnSortAdded = "按添加"
+    override fun vpnSubFailed(reason: String) = "导入失败（$reason）"
 }

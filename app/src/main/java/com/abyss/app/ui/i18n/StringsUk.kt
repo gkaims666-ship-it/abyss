@@ -454,4 +454,11 @@ object StringsUk : Strings() {
     override val safetyOngoing = "зараз"
     override val safetyMinShort = "хв"
     override val safetyNotifBlocked = "Сповіщення вимкнено — натисніть, щоб дозволити"
+
+    // ---- vpn: speed test + sort
+    override val vpnTestAll = "Перевірити швидкість"
+    override val vpnTesting = "Перевіряю…"
+    override val vpnSortSpeed = "за швидкістю"
+    override val vpnSortAdded = "за додаванням"
+    override fun vpnSubFailed(reason: String) = "Не вдалося імпортувати ($reason)"
 }

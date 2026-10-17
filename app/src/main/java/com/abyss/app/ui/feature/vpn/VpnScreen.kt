@@ -45,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.abyss.app.core.ServiceLocator
 import com.abyss.app.feature.vpn.SubscriptionParser
+import com.abyss.app.feature.vpn.VpnPing
+import com.abyss.app.feature.vpn.PingLogic
 import com.abyss.app.feature.vpn.VpnBridge
 import com.abyss.app.feature.vpn.VpnController
 import com.abyss.app.feature.vpn.VpnServer
@@ -68,6 +70,9 @@ fun VpnScreen(palette: AbyssPalette) {
     var pasteLinks by remember { mutableStateOf("") }
     var pending by remember { mutableStateOf<VpnServer?>(null) }
     var busyMsg by remember { mutableStateOf<String?>(null) }
+    var latency by remember { mutableStateOf<Map<String, Int?>>(emptyMap()) }
+    var testing by remember { mutableStateOf(false) }
+    var sortBySpeed by remember { mutableStateOf(false) }
 
     val vpnConsent = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()) { result ->
@@ -106,9 +111,9 @@ fun VpnScreen(palette: AbyssPalette) {
                 scope.launch {
                     busyMsg = S.fetching
                     store.setSubscriptionUrl(sub)
-                    val parsed = SubscriptionParser.fetchSubscription(sub)
-                    if (parsed.isNotEmpty()) store.saveServers(merge(servers, parsed))
-                    busyMsg = S.importedServers(parsed.size)
+                    val res = SubscriptionParser.fetchSubscription(sub)
+                    if (res.servers.isNotEmpty()) store.saveServers(merge(servers, res.servers))
+                    busyMsg = res.error?.let { S.vpnSubFailed(it) } ?: S.importedServers(res.servers.size)
                 }
             }
         }
@@ -130,12 +135,29 @@ fun VpnScreen(palette: AbyssPalette) {
             fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 6.dp)) }
 
         Spacer(Modifier.size(16.dp))
-        Text(S.serversCount(servers.size), color = palette.primary, fontWeight = FontWeight.Bold,
-            fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(S.serversCount(servers.size), color = palette.primary, fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            if (servers.size > 1) {
+                Text(if (sortBySpeed) S.vpnSortSpeed else S.vpnSortAdded,
+                    color = palette.onSurface.copy(alpha = 0.7f), fontSize = 11.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { sortBySpeed = !sortBySpeed }
+                        .padding(horizontal = 8.dp, vertical = 4.dp))
+            }
+        }
+        if (servers.isNotEmpty()) {
+            Spacer(Modifier.size(8.dp))
+            Btn(if (testing) S.vpnTesting else S.vpnTestAll, palette) {
+                if (!testing) scope.launch { testing = true; latency = VpnPing.measureAll(servers); testing = false }
+            }
+        }
         Spacer(Modifier.size(8.dp))
-        servers.forEach { s ->
+        val shown = if (sortBySpeed) PingLogic.sortByLatency(servers.map { it.id }, latency)
+            .mapNotNull { id -> servers.firstOrNull { it.id == id } } else servers
+        shown.forEach { s ->
             ServerRow(s, selected = s.id == selectedId,
                 connected = (status as? VpnStatus.Connected)?.label == s.label(),
+                latencyMs = latency[s.id], tested = latency.containsKey(s.id),
                 palette = palette,
                 onConnect = { connect(s) },
                 onDelete = { scope.launch { store.saveServers(servers.filterNot { it.id == s.id }) } })
@@ -173,8 +195,8 @@ private fun StatusCard(status: VpnStatus, palette: AbyssPalette, onDisconnect: (
 
 @Composable
 private fun ServerRow(
-    s: VpnServer, selected: Boolean, connected: Boolean, palette: AbyssPalette,
-    onConnect: () -> Unit, onDelete: () -> Unit,
+    s: VpnServer, selected: Boolean, connected: Boolean, latencyMs: Int?, tested: Boolean,
+    palette: AbyssPalette, onConnect: () -> Unit, onDelete: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp))
         .background(if (connected) palette.surfaceVariant else palette.surface)
@@ -183,6 +205,13 @@ private fun ServerRow(
             Text(s.label(), color = palette.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Text("${s.protocol.name.lowercase()} · ${s.host}:${s.port}",
                 color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        }
+        if (tested) {
+            val col = when (PingLogic.tier(latencyMs)) {
+                0 -> Color(0xFF5DBB7B); 1 -> Color(0xFFF5A623); 2 -> Color(0xFFE5705A); else -> palette.onSurface.copy(alpha = 0.4f)
+            }
+            Text(PingLogic.label(latencyMs), color = col, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            Spacer(Modifier.size(8.dp))
         }
         if (connected) Text("●", color = palette.primary, fontSize = 16.sp)
         Spacer(Modifier.size(10.dp))

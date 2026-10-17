@@ -107,6 +107,7 @@ object XrayConfig {
                 putJsonObject("realitySettings") {
                     put("serverName", p("sni")); put("fingerprint", p("fp").ifBlank { "chrome" })
                     put("publicKey", p("pbk")); put("shortId", p("sid"))
+                    if (p("spx").isNotBlank()) put("spiderX", p("spx"))
                 }
             } else {
                 putJsonObject("tlsSettings") {
@@ -124,6 +125,10 @@ object XrayConfig {
                 if (p("host").isNotBlank()) putJsonObject("headers") { put("Host", p("host")) }
             }
             "grpc" -> putJsonObject("grpcSettings") { put("serviceName", p("serviceName")) }
+            "httpupgrade" -> putJsonObject("httpupgradeSettings") {
+                put("path", p("path").ifBlank { "/" })
+                if (p("host").isNotBlank()) put("host", p("host"))
+            }
             "tcp" -> if (p("headerType") == "http") putJsonObject("tcpSettings") {
                 putJsonObject("header") { put("type", "http") }
             }

@@ -454,4 +454,11 @@ object StringsTr : Strings() {
     override val safetyOngoing = "şimdi"
     override val safetyMinShort = "dk"
     override val safetyNotifBlocked = "Bildirimler kapalı — izin vermek için dokun"
+
+    // ---- vpn: speed test + sort
+    override val vpnTestAll = "Hızı test et"
+    override val vpnTesting = "Test ediliyor…"
+    override val vpnSortSpeed = "hıza göre"
+    override val vpnSortAdded = "eklemeye göre"
+    override fun vpnSubFailed(reason: String) = "İçe aktarma başarısız ($reason)"
 }

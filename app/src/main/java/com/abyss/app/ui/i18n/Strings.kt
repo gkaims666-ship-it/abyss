@@ -463,6 +463,13 @@ abstract class Strings {
 
     abstract val safetyNotifBlocked: String
 
+    // ---- vpn: speed test + sort
+    abstract val vpnTestAll: String
+    abstract val vpnTesting: String
+    abstract val vpnSortSpeed: String
+    abstract val vpnSortAdded: String
+    abstract fun vpnSubFailed(reason: String): String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

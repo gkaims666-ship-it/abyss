@@ -454,4 +454,11 @@ object StringsRu : Strings() {
     override val safetyOngoing = "сейчас"
     override val safetyMinShort = "мин"
     override val safetyNotifBlocked = "Уведомления выключены — нажмите, чтобы разрешить"
+
+    // ---- vpn: speed test + sort
+    override val vpnTestAll = "Проверить скорость"
+    override val vpnTesting = "Проверяю…"
+    override val vpnSortSpeed = "по скорости"
+    override val vpnSortAdded = "по добавлению"
+    override fun vpnSubFailed(reason: String) = "Не удалось импортировать ($reason)"
 }

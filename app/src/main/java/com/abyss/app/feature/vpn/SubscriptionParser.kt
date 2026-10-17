@@ -29,12 +29,23 @@ object SubscriptionParser {
             .mapNotNull { runCatching { parseLink(it) }.getOrNull() }
     }
 
-    suspend fun fetchSubscription(url: String): List<VpnServer> = withContext(Dispatchers.IO) {
+    /** Outcome of a subscription fetch: servers found, or a human error reason. */
+    data class SubResult(val servers: List<VpnServer>, val error: String? = null)
+
+    suspend fun fetchSubscription(url: String): SubResult = withContext(Dispatchers.IO) {
+        val u = url.trim()
+        if (!u.startsWith("http://") && !u.startsWith("https://")) return@withContext SubResult(emptyList(), "bad_url")
         runCatching {
-            Http.client.newCall(Request.Builder().url(url).build()).execute().use { r ->
-                parseMany(r.body?.string().orEmpty())
+            // Many subscription servers only answer a client-like User-Agent.
+            val req = Request.Builder().url(u)
+                .header("User-Agent", "v2rayNG/1.9.5")
+                .header("Accept", "*/*")
+                .build()
+            Http.client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) return@use SubResult(emptyList(), "http_${r.code}")
+                SubResult(parseMany(r.body?.string().orEmpty()))
             }
-        }.getOrDefault(emptyList())
+        }.getOrElse { SubResult(emptyList(), "network") }
     }
 
     fun parseLink(link: String): VpnServer? = when {
@@ -84,7 +95,9 @@ object SubscriptionParser {
             "serviceName" to (q["serviceName"] ?: ""),
             "pbk" to (q["pbk"] ?: ""),
             "sid" to (q["sid"] ?: ""),
+            "spx" to (q["spx"] ?: ""),
             "alpn" to (q["alpn"] ?: ""),
+            "headerType" to (q["headerType"] ?: ""),
         )
         return VpnServer(id("$proto$host$port$secret"), remark, proto, host, port, secret, params)
     }

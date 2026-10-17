@@ -454,4 +454,11 @@ object StringsJa : Strings() {
     override val safetyOngoing = "現在"
     override val safetyMinShort = "分"
     override val safetyNotifBlocked = "通知がオフです — タップして許可"
+
+    // ---- vpn: speed test + sort
+    override val vpnTestAll = "速度テスト"
+    override val vpnTesting = "テスト中…"
+    override val vpnSortSpeed = "速度順"
+    override val vpnSortAdded = "追加順"
+    override fun vpnSubFailed(reason: String) = "インポート失敗（$reason）"
 }

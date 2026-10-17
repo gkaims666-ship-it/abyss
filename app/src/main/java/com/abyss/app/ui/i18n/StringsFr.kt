@@ -454,4 +454,11 @@ object StringsFr : Strings() {
     override val safetyOngoing = "maintenant"
     override val safetyMinShort = "min"
     override val safetyNotifBlocked = "Notifications désactivées — touchez pour autoriser"
+
+    // ---- vpn: speed test + sort
+    override val vpnTestAll = "Tester la vitesse"
+    override val vpnTesting = "Test…"
+    override val vpnSortSpeed = "par vitesse"
+    override val vpnSortAdded = "par ajout"
+    override fun vpnSubFailed(reason: String) = "Échec de l’import ($reason)"
 }
