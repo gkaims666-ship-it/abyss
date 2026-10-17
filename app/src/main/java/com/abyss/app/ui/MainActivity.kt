@@ -1,5 +1,7 @@
 package com.abyss.app.ui
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -16,6 +18,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.abyss.app.ui.background.AbyssAnimatedBackground
 import com.abyss.app.ui.background.AbyssWaveOverlay
+import com.abyss.app.ui.background.LocalAbyssField
 import com.abyss.app.ui.background.abyssTouchWaves
 import com.abyss.app.ui.background.rememberAbyssBackgroundState
 import androidx.activity.enableEdgeToEdge
@@ -134,7 +137,7 @@ private fun AbyssRoot() {
     val dim by animateFloatAsState(
         if (tab == Tab.Chat && state.messages.isEmpty()) 0f else 0.45f, tween(600), label = "dim")
 
-    CompositionLocalProvider(LocalStrings provides strings) {
+    CompositionLocalProvider(LocalStrings provides strings, LocalAbyssField provides bg) {
     AbyssTheme(palette = palette) {
         Box(Modifier.fillMaxSize().abyssTouchWaves(bg)) {
             // One living background + waves for the whole app, every tab.
@@ -207,7 +210,7 @@ private fun PillNav(palette: AbyssPalette, current: Tab, onSelect: (Tab) -> Unit
         contentAlignment = Alignment.Center,
     ) {
         Row(
-            Modifier.clip(RoundedCornerShape(28.dp))
+            Modifier.abyssObstacle(28.dp).clip(RoundedCornerShape(28.dp))
                 .background(palette.surface)
                 .border(1.dp, palette.outline, RoundedCornerShape(28.dp))
                 .padding(5.dp),

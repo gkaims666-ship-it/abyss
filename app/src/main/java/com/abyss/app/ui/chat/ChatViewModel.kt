@@ -208,17 +208,25 @@ class ChatViewModel : ViewModel() {
             stream = true)
 
         val sb = StringBuilder()
+        // Tokens can arrive 50–100×/s; repainting the chat that often only costs frames.
+        // Coalesce to ~30 updates/s — still reads as live typing.
+        var lastPush = 0L
+        fun pushStreamed() {
+            val current = sb.toString()
+            _state.update { st ->
+                st.copy(messages = st.messages.map {
+                    if (it.id == assistantId) it.copy(content = current) else it
+                })
+            }
+        }
         try {
             provider.stream(request, key).collect { chunk ->
                 if (chunk.done) return@collect
                 sb.append(chunk.delta)
-                val current = sb.toString()
-                _state.update { st ->
-                    st.copy(messages = st.messages.map {
-                        if (it.id == assistantId) it.copy(content = current) else it
-                    })
-                }
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - lastPush >= 33L) { lastPush = nowMs; pushStreamed() }
             }
+            pushStreamed()
         } catch (e: Throwable) {
             val msg = (e as? LlmError)?.message ?: e.message ?: I18n.current.errRequestFailed
             _state.update { st ->

@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.calc
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import com.abyss.app.ui.i18n.LocalStrings
 
 import androidx.compose.animation.core.animateFloatAsState
@@ -151,7 +153,7 @@ private fun CalcButton(
         modifier
             .scale(scale)
             .aspectRatio(if (key is Key.Equals) 3f else 1.3f)
-            .clip(RoundedCornerShape(16.dp))
+            .abyssObstacle(16.dp).clip(RoundedCornerShape(16.dp))
             .background(bg)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick),
         contentAlignment = Alignment.Center,

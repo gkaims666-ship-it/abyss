@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.translate
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import com.abyss.app.ui.i18n.LocalStrings
 
 import androidx.compose.animation.AnimatedVisibility
@@ -79,7 +81,7 @@ fun TranslatorScreen(palette: AbyssPalette) {
         Spacer(Modifier.size(16.dp))
 
         // Source card
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+        Box(Modifier.fillMaxWidth().abyssObstacle(16.dp).clip(RoundedCornerShape(16.dp))
             .background(palette.surface).padding(4.dp)) {
             TextField(
                 value = input,
@@ -99,7 +101,7 @@ fun TranslatorScreen(palette: AbyssPalette) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box {
                 Row(
-                    Modifier.clip(RoundedCornerShape(50))
+                    Modifier.abyssObstacle(20.dp).clip(RoundedCornerShape(50))
                         .background(palette.surfaceVariant).clickable { langMenu = true }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -137,7 +139,7 @@ fun TranslatorScreen(palette: AbyssPalette) {
         Spacer(Modifier.size(16.dp))
         AnimatedVisibility(visible = output.isNotBlank(), enter = fadeIn(), exit = fadeOut()) {
             Box(Modifier.fillMaxWidth().animateContentSize()
-                .clip(RoundedCornerShape(16.dp))
+                .abyssObstacle(16.dp).clip(RoundedCornerShape(16.dp))
                 .background(palette.assistantBubble).padding(16.dp)) {
                 Column {
                     Text(output, color = palette.onSurface, fontSize = 16.sp)
@@ -167,7 +169,7 @@ fun TranslatorScreen(palette: AbyssPalette) {
 private fun TranslateButton(palette: AbyssPalette, busy: Boolean, onClick: () -> Unit) {
     val S = LocalStrings.current
     Box(
-        Modifier.clip(RoundedCornerShape(50)).background(palette.primary)
+        Modifier.abyssObstacle(24.dp).clip(RoundedCornerShape(50)).background(palette.primary)
             .clickable(enabled = !busy, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,

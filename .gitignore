@@ -1,0 +1,12 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.keystore
+gradle-*-bin.zip
+gradle-8.11.1/

@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.vpn
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import com.abyss.app.ui.i18n.LocalStrings
 
 import android.net.VpnService
@@ -158,7 +160,7 @@ private fun StatusCard(status: VpnStatus, palette: AbyssPalette, onDisconnect: (
         is VpnStatus.Error -> S.vpnError(status.message) to palette.error
         VpnStatus.Disconnected -> S.vpnDisconnected to palette.onSurface.copy(alpha = 0.6f)
     }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(palette.surface).padding(16.dp),
+    Row(Modifier.fillMaxWidth().abyssObstacle(16.dp).clip(RoundedCornerShape(16.dp)).background(palette.surface).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(12.dp).clip(CircleShape).background(color))
         Spacer(Modifier.size(10.dp))
@@ -174,7 +176,7 @@ private fun ServerRow(
     s: VpnServer, selected: Boolean, connected: Boolean, palette: AbyssPalette,
     onConnect: () -> Unit, onDelete: () -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+    Row(Modifier.fillMaxWidth().abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp))
         .background(if (connected) palette.surfaceVariant else palette.surface)
         .clickable(onClick = onConnect).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -191,7 +193,7 @@ private fun ServerRow(
 
 @Composable
 private fun Btn(text: String, palette: AbyssPalette, onClick: () -> Unit) {
-    Box(Modifier.clip(RoundedCornerShape(12.dp)).background(palette.primary)
+    Box(Modifier.abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp)).background(palette.primary)
         .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(text, color = palette.onPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }

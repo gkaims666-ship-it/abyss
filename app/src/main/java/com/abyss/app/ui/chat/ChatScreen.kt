@@ -1,5 +1,7 @@
 package com.abyss.app.ui.chat
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.animation.core.animateFloatAsState
@@ -246,7 +248,7 @@ private fun TopBar(
         Spacer(Modifier.weight(1f))
         Box {
             Row(
-                Modifier.clip(RoundedCornerShape(50)).clickable { menu = true }
+                Modifier.abyssObstacle(20.dp).clip(RoundedCornerShape(50)).clickable { menu = true }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -281,7 +283,7 @@ private fun TopBar(
 @Composable
 private fun IconBtn(icon: ImageVector, desc: String, palette: AbyssPalette, onClick: () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick),
+        Modifier.size(44.dp).abyssObstacle(22.dp).clip(CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(icon, desc, tint = palette.onBackground.copy(alpha = 0.85f), modifier = Modifier.size(22.dp)) }
 }
@@ -354,7 +356,7 @@ private fun Hero(
             sugs.forEachIndexed { i, s ->
                 Appear(delayMs = 260 + i * 60) {
                     Row(
-                        Modifier.clip(RoundedCornerShape(12.dp))
+                        Modifier.abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp))
                             .border(1.dp, palette.outline, RoundedCornerShape(12.dp))
                             .background(palette.surface.copy(alpha = 0.55f))
                             .clickable {
@@ -467,7 +469,7 @@ private fun JumpToLatest(visible: Boolean, palette: AbyssPalette, modifier: Modi
         modifier = modifier,
     ) {
         Box(
-            Modifier.size(38.dp).clip(CircleShape)
+            Modifier.size(38.dp).abyssObstacle(19.dp).clip(CircleShape)
                 .background(palette.surface)
                 .border(1.dp, palette.outline, CircleShape)
                 .clickable(onClick = onClick),
@@ -486,7 +488,7 @@ private fun UserMessage(msg: UiMessage, palette: AbyssPalette, onDelete: () -> U
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
         Box(
             Modifier.widthIn(max = 310.dp)
-                .clip(RoundedCornerShape(20.dp))
+                .abyssObstacle(20.dp).clip(RoundedCornerShape(20.dp))
                 .background(palette.userBubble)
                 .combinedClickable(onClick = {}, onLongClick = { menu = true })
                 .padding(horizontal = 16.dp, vertical = 11.dp),
@@ -574,7 +576,7 @@ private fun AssistantMessage(
 
 @Composable
 private fun SmallAction(icon: ImageVector, palette: AbyssPalette, tint: Color? = null, onClick: () -> Unit) {
-    Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(32.dp).abyssObstacle(16.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
         androidx.compose.animation.Crossfade(targetState = icon, label = "act") { ic ->
             Icon(ic, null, tint = tint ?: palette.onSurface.copy(alpha = 0.5f), modifier = Modifier.size(16.dp))
         }
@@ -640,7 +642,7 @@ private fun Composer(
 
     Column(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .abyssObstacle(24.dp).clip(RoundedCornerShape(24.dp))
             .background(palette.surface.copy(alpha = if (palette.dark) 0.94f else 1f))
             .border(1.dp, border, RoundedCornerShape(24.dp))
             .drawWithContent {
@@ -700,7 +702,7 @@ private fun Composer(
                 prettyModel(state.settings.model),
                 color = palette.onSurface.copy(alpha = 0.6f), fontSize = 13.sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 150.dp).clip(RoundedCornerShape(8.dp))
+                modifier = Modifier.widthIn(max = 150.dp).abyssObstacle(8.dp).clip(RoundedCornerShape(8.dp))
                     .clickable(onClick = onModel).padding(horizontal = 8.dp, vertical = 6.dp),
             )
             Spacer(Modifier.width(6.dp))
@@ -714,7 +716,7 @@ private fun Composer(
                 if (pressed) 0.86f else 1f, spring(dampingRatio = 0.45f, stiffness = 600f), label = "ss")
             Box(
                 Modifier.size(36.dp).graphicsLayer { scaleX = sendScale; scaleY = sendScale }
-                    .clip(RoundedCornerShape(10.dp)).background(sendBg)
+                    .abyssObstacle(10.dp).clip(RoundedCornerShape(10.dp)).background(sendBg)
                     .clickable(interactionSource = press, indication = null, enabled = canSend) {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         if (state.isBusy) vm.stop() else vm.send()
@@ -735,7 +737,7 @@ private fun prettyModel(m: String): String =
 @Composable
 private fun ComposerIcon(icon: ImageVector, palette: AbyssPalette, onClick: () -> Unit) {
     Box(
-        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
+        Modifier.size(36.dp).abyssObstacle(10.dp).clip(RoundedCornerShape(10.dp))
             .border(1.dp, palette.outline, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -763,7 +765,7 @@ private fun RecordingRow(palette: AbyssPalette, onCancel: () -> Unit, onSend: ()
         Text(LocalStrings.current.cancel, color = palette.onSurface.copy(alpha = 0.7f), fontSize = 14.sp,
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onCancel).padding(8.dp))
         Spacer(Modifier.width(6.dp))
-        Box(Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(palette.primary)
+        Box(Modifier.size(36.dp).abyssObstacle(10.dp).clip(RoundedCornerShape(10.dp)).background(palette.primary)
             .clickable(onClick = onSend), contentAlignment = Alignment.Center) {
             Icon(Icons.Filled.ArrowUpward, LocalStrings.current.send, tint = palette.onPrimary, modifier = Modifier.size(20.dp))
         }

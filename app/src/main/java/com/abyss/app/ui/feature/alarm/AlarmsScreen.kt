@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.alarm
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import com.abyss.app.ui.i18n.LocalStrings
 
 import com.abyss.app.ui.components.blockTaps
@@ -89,7 +91,7 @@ fun AlarmsScreen(palette: AbyssPalette) {
 
         Box(
             Modifier.align(Alignment.BottomEnd).padding(20.dp).size(58.dp)
-                .clip(RoundedCornerShape(50)).background(palette.primary)
+                .abyssObstacle(28.dp).clip(RoundedCornerShape(50)).background(palette.primary)
                 .clickable { editing = AlarmEntity(hour = 7, minute = 0, days = "1,2,3,4,5") },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.Add, S.newAlarm, tint = palette.onPrimary) }
@@ -122,7 +124,7 @@ fun AlarmsScreen(palette: AbyssPalette) {
 private fun AlarmRow(alarm: AlarmEntity, palette: AbyssPalette, onToggle: () -> Unit, onClick: () -> Unit) {
     val S = LocalStrings.current
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+        Modifier.fillMaxWidth().abyssObstacle(18.dp).clip(RoundedCornerShape(18.dp))
             .background(palette.surface.copy(alpha = if (palette.dark) 0.86f else 0.96f))
             .border(1.dp, if (alarm.enabled) palette.primary.copy(alpha = 0.45f) else palette.outline, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick).padding(16.dp),
@@ -162,7 +164,7 @@ private fun AlarmEditor(
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable(onClick = onDismiss)) {
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                .abyssObstacle(22.dp).clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                 .background(palette.surface).padding(18.dp).blockTaps(),
         ) {
             // Time steppers
@@ -179,7 +181,7 @@ private fun AlarmEditor(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 (1..7).forEach { d ->
                     val on = d in days
-                    Box(Modifier.weight(1f).clip(CircleShape)
+                    Box(Modifier.weight(1f).abyssObstacle(20.dp).clip(CircleShape)
                         .background(if (on) palette.primary else palette.surfaceVariant)
                         .clickable { days = days.toMutableSet().apply { if (on) remove(d) else add(d) } }
                         .padding(vertical = 10.dp), Alignment.Center) {
@@ -214,7 +216,7 @@ private fun AlarmEditor(
                 if (alarm.id != 0L) Icon(Icons.Filled.Delete, S.delete, tint = palette.error,
                     modifier = Modifier.size(24.dp).clickable(onClick = onDelete))
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.clip(RoundedCornerShape(12.dp)).background(palette.primary)
+                Box(Modifier.abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp)).background(palette.primary)
                     .clickable {
                         onSave(alarm.copy(
                             hour = hour, minute = minute, label = label,

@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.tools
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -133,7 +135,7 @@ private fun HubGrid(palette: AbyssPalette, onOpen: (Tool) -> Unit) {
             Appear(delayMs = 60 * i) {
                 Column(
                     Modifier.fillMaxWidth().heightIn(min = 132.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        .abyssObstacle(20.dp).clip(RoundedCornerShape(20.dp))
                         .background(palette.surface.copy(alpha = if (palette.dark) 0.82f else 0.95f))
                         .border(1.dp, palette.outline, RoundedCornerShape(20.dp))
                         .clickable { onOpen(tool) }

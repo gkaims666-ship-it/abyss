@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.perms
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import com.abyss.app.ui.i18n.LocalStrings
 
 import android.app.AlarmManager
@@ -81,7 +83,7 @@ fun PermissionsScreen(palette: AbyssPalette) {
             color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
         Spacer(Modifier.size(12.dp))
 
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(palette.primary)
+        Box(Modifier.fillMaxWidth().abyssObstacle(14.dp).clip(RoundedCornerShape(14.dp)).background(palette.primary)
             .clickable { multi.launch(runtimePerms(S).map { it.permission }.toTypedArray()) }
             .padding(vertical = 14.dp), Alignment.Center) {
             Text(S.requestAll, color = palette.onPrimary,
@@ -130,7 +132,7 @@ fun PermissionsScreen(palette: AbyssPalette) {
 @Composable
 private fun PermRow(title: String, why: String, granted: Boolean, palette: AbyssPalette, onRequest: () -> Unit) {
     val S = LocalStrings.current
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(palette.surface)
+    Row(Modifier.fillMaxWidth().abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp)).background(palette.surface)
         .padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = palette.onSurface, fontWeight = FontWeight.SemiBold)

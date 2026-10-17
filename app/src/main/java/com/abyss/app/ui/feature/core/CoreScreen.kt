@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.core
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import com.abyss.app.ui.i18n.LocalStrings
 
 import androidx.compose.foundation.background
@@ -108,7 +110,7 @@ fun CoreScreen(palette: AbyssPalette) {
             SectionTitle(S.recentKnowledge, palette)
             recent.forEach { e ->
                 Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)
-                    .clip(RoundedCornerShape(12.dp)).background(palette.surface).padding(12.dp)) {
+                    .abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp)).background(palette.surface).padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(if (e.kind == "reflection") "◆ ${S.reflectionTag}" else "✦ ${e.source}",
                             color = palette.secondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
@@ -165,7 +167,7 @@ fun CoreScreen(palette: AbyssPalette) {
             Text(S.downloadedModels, color = palette.onSurface.copy(alpha = 0.7f), fontSize = 12.sp)
             models.forEach { file ->
                 val active = settings?.localModelActivePath == file.absolutePath
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                Row(Modifier.fillMaxWidth().abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp))
                     .background(if (active) palette.surfaceVariant else palette.surface)
                     .clickable {
                         scope.launch {
@@ -198,7 +200,7 @@ private fun LaunchedEffectRefresh(block: suspend () -> Unit) {
 
 @Composable
 private fun StatCard(label: String, value: String, palette: AbyssPalette, modifier: Modifier) {
-    Column(modifier.clip(RoundedCornerShape(16.dp)).background(palette.surface).padding(16.dp)) {
+    Column(modifier.abyssObstacle(16.dp).clip(RoundedCornerShape(16.dp)).background(palette.surface).padding(16.dp)) {
         Text(value, color = palette.primary, fontWeight = FontWeight.Bold,
             fontFamily = FontFamily.Monospace, fontSize = 22.sp)
         Text(label, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp)
@@ -223,7 +225,7 @@ private fun PrimaryButton(
     text: String, palette: AbyssPalette, modifier: Modifier = Modifier,
     enabled: Boolean = true, onClick: () -> Unit,
 ) {
-    Box(modifier.clip(RoundedCornerShape(12.dp))
+    Box(modifier.abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp))
         .background(if (enabled) palette.primary else palette.surfaceVariant)
         .clickable(enabled = enabled, onClick = onClick).padding(vertical = 12.dp, horizontal = 16.dp),
         contentAlignment = Alignment.Center) {

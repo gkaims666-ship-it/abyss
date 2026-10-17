@@ -1,5 +1,7 @@
 package com.abyss.app.ui.chat
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -125,22 +127,22 @@ fun MarkdownText(text: String, palette: AbyssPalette, modifier: Modifier = Modif
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         blocks.forEach { b ->
             when (b) {
-                is MdBlock.Para -> Text(inline(b.text, palette), color = palette.onSurface,
+                is MdBlock.Para -> Text(remember(b.text, palette.id) { inline(b.text, palette) }, color = palette.onSurface,
                     fontFamily = AbyssFonts.Reading, fontSize = 16.5.sp, lineHeight = 26.sp)
-                is MdBlock.Heading -> Text(inline(b.text, palette), color = palette.onBackground,
+                is MdBlock.Heading -> Text(remember(b.text, palette.id) { inline(b.text, palette) }, color = palette.onBackground,
                     fontFamily = AbyssFonts.Display, fontWeight = FontWeight.SemiBold,
                     fontSize = when (b.level) { 1 -> 23.sp; 2 -> 20.sp; else -> 18.sp },
                     modifier = Modifier.padding(top = 4.dp))
                 is MdBlock.Bullet -> Row {
                     Text(b.marker, color = palette.primary, fontFamily = AbyssFonts.Reading,
                         fontSize = 16.5.sp, modifier = Modifier.width(24.dp))
-                    Text(inline(b.text, palette), color = palette.onSurface,
+                    Text(remember(b.text, palette.id) { inline(b.text, palette) }, color = palette.onSurface,
                         fontFamily = AbyssFonts.Reading, fontSize = 16.5.sp, lineHeight = 26.sp)
                 }
                 is MdBlock.Quote -> Row(Modifier.fillMaxWidth()) {
                     Box(Modifier.width(3.dp).height(24.dp).background(palette.primary.copy(alpha = 0.6f)))
                     Spacer(Modifier.width(12.dp))
-                    Text(inline(b.text, palette), color = palette.onSurface.copy(alpha = 0.8f),
+                    Text(remember(b.text, palette.id) { inline(b.text, palette) }, color = palette.onSurface.copy(alpha = 0.8f),
                         fontFamily = AbyssFonts.Reading, fontStyle = FontStyle.Italic, fontSize = 16.sp)
                 }
                 is MdBlock.Code -> CodeBlock(b.lang, b.code, palette)
@@ -155,7 +157,7 @@ private fun CodeBlock(lang: String, code: String, palette: AbyssPalette) {
     val clipboard = LocalClipboardManager.current
     var copied by remember { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+        Modifier.fillMaxWidth().abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp))
             .background(if (palette.dark) palette.background.copy(alpha = 0.85f) else palette.surfaceVariant)
             .border(1.dp, palette.outline, RoundedCornerShape(12.dp)),
     ) {

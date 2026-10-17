@@ -1,5 +1,7 @@
 package com.abyss.app.ui.feature.notes
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import com.abyss.app.ui.i18n.LocalStrings
 
 import com.abyss.app.ui.components.blockTaps
@@ -110,7 +112,7 @@ fun NotesScreen(palette: AbyssPalette) {
 
         Box(
             Modifier.align(Alignment.BottomEnd).padding(20.dp).size(58.dp)
-                .clip(RoundedCornerShape(50)).background(palette.primary)
+                .abyssObstacle(28.dp).clip(RoundedCornerShape(50)).background(palette.primary)
                 .clickable { editing = NoteEntity() },
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Filled.Add, S.newNote, tint = palette.onPrimary) }
@@ -143,7 +145,7 @@ private fun NoteCard(note: NoteEntity, palette: AbyssPalette, onClick: () -> Uni
     val S = LocalStrings.current
     Column(
         Modifier.fillMaxWidth().heightIn(min = 96.dp)
-            .clip(RoundedCornerShape(16.dp)).background(noteTint(note.colorIndex, palette))
+            .abyssObstacle(16.dp).clip(RoundedCornerShape(16.dp)).background(noteTint(note.colorIndex, palette))
             .border(1.dp, if (note.pinned) palette.primary.copy(alpha = 0.6f) else palette.outline, RoundedCornerShape(16.dp))
             .clickable(onClick = onClick).padding(12.dp),
     ) {
@@ -173,7 +175,7 @@ private fun NoteEditor(
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).clickable(onClick = onDismiss)) {
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                .abyssObstacle(22.dp).clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                 .background(palette.surface).padding(18.dp)
                 .blockTaps(),
         ) {
@@ -197,7 +199,7 @@ private fun NoteEditor(
                 if (note.id != 0L) Icon(Icons.Filled.Delete, S.delete, tint = palette.error,
                     modifier = Modifier.size(24.dp).clickable(onClick = onDelete))
                 Spacer(Modifier.size(14.dp))
-                Box(Modifier.clip(RoundedCornerShape(12.dp)).background(palette.primary)
+                Box(Modifier.abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp)).background(palette.primary)
                     .clickable { onSave(note.copy(title = title, body = body, colorIndex = color)) }
                     .padding(horizontal = 20.dp, vertical = 12.dp)) {
                     Text(S.save, color = palette.onPrimary, fontWeight = FontWeight.SemiBold)

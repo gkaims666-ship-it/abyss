@@ -1,0 +1,60 @@
+name: Build Abyss APK (with VPN engine)
+
+# Opt-in, best-effort: builds the Xray-core Android library (gomobile) and
+# packages it, then builds the APK. The JNI shim that exposes the symbols in
+# app/src/main/cpp/vpn/CONTRACT.md must be present; tune to the libXray version.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with: { go-version: '1.22' }
+
+      - name: Set up Android SDK + NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Install NDK & gomobile
+        run: |
+          yes | sdkmanager "ndk;27.1.12297006" "cmake;3.22.1" >/dev/null || true
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Build libXray (gomobile) → app/libs
+        run: |
+          set -e
+          git clone --depth 1 https://github.com/XTLS/libXray.git /tmp/libXray
+          cd /tmp/libXray
+          gomobile init || true
+          gomobile bind -target=android/arm64 -o "$GITHUB_WORKSPACE/app/libs/libXray.aar" ./ || \
+            echo "::warning::libXray gomobile bind needs adapter tuning — see CONTRACT.md"
+          ls -la "$GITHUB_WORKSPACE/app/libs" || true
+
+      - name: Download Gradle
+        run: |
+          wget -q "https://services.gradle.org/distributions/gradle-8.11.1-bin.zip"
+          unzip -q "gradle-8.11.1-bin.zip"
+          echo "$PWD/gradle-8.11.1/bin" >> "$GITHUB_PATH"
+
+      - name: Build APK with VPN flag
+        run: gradle assembleDebug -PwithVpn --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: abyss-debug-apk-vpn
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

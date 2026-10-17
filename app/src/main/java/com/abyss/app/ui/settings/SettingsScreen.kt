@@ -1,5 +1,7 @@
 package com.abyss.app.ui.settings
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -383,7 +385,7 @@ private fun statusText(S: Strings, p: LlmProvider, hasKey: Boolean): String = wh
 @Composable
 private fun Group(palette: AbyssPalette, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+        Modifier.fillMaxWidth().abyssObstacle(18.dp).clip(RoundedCornerShape(18.dp))
             .background(palette.surface.copy(alpha = if (palette.dark) 0.86f else 0.96f))
             .border(1.dp, palette.outline, RoundedCornerShape(18.dp)),
         content = content,
@@ -496,7 +498,7 @@ private fun CompactField(
     action: String, enabled: Boolean, secret: Boolean = false, onAction: () -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(palette.surfaceVariant)
+        Modifier.fillMaxWidth().abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp)).background(palette.surfaceVariant)
             .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -515,7 +517,7 @@ private fun CompactField(
 
 @Composable
 private fun MultilineField(value: String, onValueChange: (String) -> Unit, placeholder: String, palette: AbyssPalette) {
-    Box(Modifier.fillMaxWidth().heightIn(min = 84.dp).clip(RoundedCornerShape(12.dp))
+    Box(Modifier.fillMaxWidth().heightIn(min = 84.dp).abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp))
         .background(palette.surfaceVariant).padding(14.dp)) {
         if (value.isEmpty()) Text(placeholder, color = palette.onSurface.copy(alpha = 0.38f), fontSize = 14.sp)
         BasicTextField(value, onValueChange,
@@ -527,7 +529,7 @@ private fun MultilineField(value: String, onValueChange: (String) -> Unit, place
 @Composable
 private fun PillButton(text: String, palette: AbyssPalette, enabled: Boolean = true, onClick: () -> Unit) {
     val bg by animateColorAsState(if (enabled) palette.primary else palette.primary.copy(alpha = 0.3f), tween(200), label = "pb")
-    Box(Modifier.clip(RoundedCornerShape(10.dp)).background(bg).clickable(enabled = enabled, onClick = onClick)
+    Box(Modifier.abyssObstacle(10.dp).clip(RoundedCornerShape(10.dp)).background(bg).clickable(enabled = enabled, onClick = onClick)
         .padding(horizontal = 14.dp, vertical = 8.dp)) {
         Text(text, color = palette.onPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
@@ -538,7 +540,7 @@ private fun Chip(text: String, selected: Boolean, palette: AbyssPalette, onClick
     val bg by animateColorAsState(if (selected) palette.primary.copy(alpha = 0.16f) else Color.Transparent, tween(200), label = "cb")
     val br by animateColorAsState(if (selected) palette.primary else palette.outline, tween(200), label = "cr")
     Row(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(bg).border(1.dp, br, RoundedCornerShape(10.dp))
+        Modifier.abyssObstacle(10.dp).clip(RoundedCornerShape(10.dp)).background(bg).border(1.dp, br, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -555,7 +557,7 @@ private fun Chip(text: String, selected: Boolean, palette: AbyssPalette, onClick
 private fun Segmented(
     options: List<Pair<String, String>>, selected: String, palette: AbyssPalette, onSelect: (String) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(palette.surfaceVariant).padding(3.dp)) {
+    Row(Modifier.fillMaxWidth().abyssObstacle(12.dp).clip(RoundedCornerShape(12.dp)).background(palette.surfaceVariant).padding(3.dp)) {
         options.forEach { (id, label) ->
             val on = id == selected
             val bg by animateColorAsState(if (on) palette.surface else Color.Transparent, tween(220), label = "sg")

@@ -1,5 +1,7 @@
 package com.abyss.app.ui.chat
 
+import com.abyss.app.ui.background.abyssObstacle
+
 import com.abyss.app.ui.components.blockTaps
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,7 +52,7 @@ fun PalettePicker(
         Column(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                .abyssObstacle(22.dp).clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
                 .background(sheet.surface)
                 .navigationBarsPadding()
                 .padding(20.dp)
@@ -79,7 +81,7 @@ private fun PaletteCard(p: AbyssPalette, selected: Boolean, onClick: () -> Unit)
     Column(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .abyssObstacle(16.dp).clip(RoundedCornerShape(16.dp))
             .background(p.background)
             .border(
                 width = if (selected) 2.dp else 1.dp,
