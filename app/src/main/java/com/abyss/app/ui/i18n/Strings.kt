@@ -372,6 +372,52 @@ abstract class Strings {
     abstract val radarSeenBy: String
     abstract val radarOwner: String
 
+    // ---- radar: roads (traffic, incidents, cameras)
+    abstract val roadSection: String
+    abstract val roadTraffic: String
+    abstract val roadIncidents: String
+    abstract val roadCameras: String
+    abstract val roadKeys: String
+    abstract val roadKeysHint: String
+    abstract val roadGetKey: String
+    abstract fun roadNeedKey(name: String): String
+    abstract val roadZoomForCams: String
+    abstract val roadKindAccident: String
+    abstract val roadKindJam: String
+    abstract val roadKindClosure: String
+    abstract val roadKindLaneClosed: String
+    abstract val roadKindRoadworks: String
+    abstract val roadKindHazard: String
+    abstract val roadKindWeather: String
+    abstract val roadKindBreakdown: String
+    abstract val roadKindEvent: String
+    abstract val roadKindOther: String
+    abstract val roadSevMinor: String
+    abstract val roadSevModerate: String
+    abstract val roadSevMajor: String
+    abstract val roadSevClosed: String
+    abstract fun roadDelay(min: Int): String
+    abstract val roadLengthLabel: String
+    abstract val roadDelayLabel: String
+    abstract val roadStart: String
+    abstract val roadEnd: String
+    abstract fun roadReports(n: Int): String
+    abstract val roadUnconfirmed: String
+    abstract val roadSourceLabel: String
+    abstract fun roadList(n: Int): String
+    abstract val roadNone: String
+    abstract val camSpeed: String
+    abstract val camRedLight: String
+    abstract val camAvgSpeed: String
+    abstract val camTraffic: String
+    abstract val camLive: String
+    abstract val camLimit: String
+    abstract val camDirection: String
+    abstract val camRefresh: String
+    abstract val camOpen: String
+    abstract val roadSaveKey: String
+    abstract val roadKeySaved: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

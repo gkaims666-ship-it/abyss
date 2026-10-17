@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -63,6 +64,12 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Umbrella
+import androidx.compose.material.icons.filled.Traffic
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -106,6 +113,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.abyss.app.feature.radar.AircraftInfo
 import com.abyss.app.feature.radar.MapCamera
+import com.abyss.app.feature.radar.CamKind
+import com.abyss.app.feature.radar.GeoBox
+import com.abyss.app.feature.radar.RoadApi
+import com.abyss.app.feature.radar.RoadCamera
+import com.abyss.app.feature.radar.RoadIncident
+import com.abyss.app.feature.radar.RoadKeys
+import com.abyss.app.feature.radar.RoadKind
+import com.abyss.app.feature.radar.RoadLogic
 import com.abyss.app.feature.radar.MapGestureEngine
 import com.abyss.app.feature.radar.MapGestureSink
 import com.abyss.app.feature.radar.BaseLayer
@@ -169,6 +184,16 @@ private class AbyssMapView(ctx: Context) : MapView(ctx) {
 }
 
 /** Fling glide time constant (s): distance = v·τ. Close to Google Maps' feel. */
+private const val KEY_TOMTOM = "tomtom"
+private const val KEY_HERE = "here"
+private const val KEY_WINDY = "windy"
+
+private fun roadEmoji(k: RoadKind): String = when (k) {
+    RoadKind.Accident -> "💥"; RoadKind.Jam -> "🚗"; RoadKind.Closure -> "⛔"; RoadKind.LaneClosed -> "🚧"
+    RoadKind.Roadworks -> "👷"; RoadKind.Hazard -> "⚠️"; RoadKind.Weather -> "🌧️"; RoadKind.Breakdown -> "🛻"
+    RoadKind.Event -> "🎪"; RoadKind.Other -> "ℹ️"
+}
+
 private const val FLING_TAU = 0.34
 private const val ZOOM_FLING_TAU = 0.16
 private const val ZOOM_ANIM_S = 0.28
@@ -219,6 +244,22 @@ private class RadarController(private val app: Context, private val scope: Corou
     var sourceOk by mutableStateOf<Set<RadarSource>>(emptySet())
     var sourceCounts by mutableStateOf<Map<RadarSource, Int>>(emptyMap())
     var selectedEvent by mutableStateOf<MapEvent?>(null)
+
+    // Roads: live traffic flow, incidents, cameras
+    var trafficOn by mutableStateOf(false)
+    var roadOn by mutableStateOf(false)
+    var camsOn by mutableStateOf(false)
+    var roadIncidents by mutableStateOf<List<RoadIncident>>(emptyList())
+    var roadCams by mutableStateOf<List<RoadCamera>>(emptyList())
+    var roadStatus by mutableStateOf<Map<String, Int?>>(emptyMap())
+    var camStatus by mutableStateOf<Map<String, Int?>>(emptyMap())
+    var camsTooFar by mutableStateOf(false)
+    var selectedRoad by mutableStateOf<RoadIncident?>(null)
+    var selectedCam by mutableStateOf<RoadCamera?>(null)
+    var camBitmap by mutableStateOf<ImageBitmap?>(null)
+    var camLoading by mutableStateOf(false)
+    var roadListOpen by mutableStateOf(false)
+    var keyVersion by mutableStateOf(0)
     var planesOn by mutableStateOf(true)
     var sheetOpen by mutableStateOf(false)
 
@@ -284,6 +325,7 @@ private class RadarController(private val app: Context, private val scope: Corou
             override fun singleTapConfirmedHelper(pt: GeoPoint): Boolean {
                 if (measuring) { addMeasurePoint(pt); return true }
                 if (selectedEvent != null) { selectedEvent = null; return true }
+                if (selectedRoad != null || selectedCam != null) { selectedRoad = null; selectedCam = null; return true }
                 if (selected != null) { select(null); return true }
                 if (pin != null) { clearPin(); return true }
                 return false
@@ -295,6 +337,8 @@ private class RadarController(private val app: Context, private val scope: Corou
         wikiFolder = FolderOverlay().also { mv.overlays.add(it) }
         measureFolder = FolderOverlay().also { mv.overlays.add(it) }
         pinFolder = FolderOverlay().also { mv.overlays.add(it) }
+        roadFolder = FolderOverlay().also { mv.overlays.add(it) }
+        camFolder = FolderOverlay().also { mv.overlays.add(it) }
         eventsFolder = FolderOverlay().also { mv.overlays.add(it) }
 
         val ov = PlaneOverlay(ctx.resources.displayMetrics.density)
@@ -308,6 +352,9 @@ private class RadarController(private val app: Context, private val scope: Corou
             val set = saved.split(',').mapNotNull { id -> RadarSource.entries.firstOrNull { it.id == id } }.toSet()
             if (set.isNotEmpty()) sources = set
         }
+        trafficOn = prefs.getBoolean("traffic", false)
+        roadOn = prefs.getBoolean("road", false)
+        camsOn = prefs.getBoolean("cams", false)
         dark = null   // force first tile source
         applyLayer()
         applyPalette(palette)
@@ -335,6 +382,8 @@ private class RadarController(private val app: Context, private val scope: Corou
             mv.setBackgroundColor(bg)
             mv.overlayManager.tilesOverlay.setLoadingBackgroundColor(bg)
             mv.overlayManager.tilesOverlay.setLoadingLineColor(bg)
+            if (trafficOn) refreshTraffic()
+            roadIcons.clear()
         }
         ov.lowColor = p.secondary.toArgb()
         ov.highColor = p.primary.toArgb()
@@ -356,6 +405,7 @@ private class RadarController(private val app: Context, private val scope: Corou
     }
 
     private fun moved() {
+        roadDirty = true
         if (following) return
         movedAt = System.currentTimeMillis()
         dirty = true
@@ -432,6 +482,18 @@ private class RadarController(private val app: Context, private val scope: Corou
             eventsAt = System.currentTimeMillis()
             scope.launch { refreshEvents(currentLang) }
         }
+        val now = System.currentTimeMillis()
+        val moved = roadDirty
+        if (roadOn && ((moved && now - roadAt > 8_000) || now - roadAt > 60_000)) {
+            roadAt = now
+            scope.launch { refreshRoads() }
+        }
+        if (camsOn && ((moved && now - camsAt > 3_000) || now - camsAt > 5 * 60_000)) {
+            camsAt = now
+            scope.launch { refreshCams() }
+        }
+        if ((roadOn || camsOn) && moved) roadDirty = false
+        if (trafficOn && now - trafficAt > 120_000) refreshTraffic()
     }
 
     /** UI language tag, set by the screen so background lookups match it. */
@@ -480,7 +542,7 @@ private class RadarController(private val app: Context, private val scope: Corou
     }
 
     fun select(p: Plane?) {
-        if (p != null) selectedEvent = null
+        if (p != null) { selectedEvent = null; selectedRoad = null; selectedCam = null }
         selected = p
         route = null
         if (p == null) following = false
@@ -767,6 +829,243 @@ private class RadarController(private val app: Context, private val scope: Corou
         mv.invalidate()
     }
 
+
+    // ------------------------------------------------------------ roads
+
+    private var roadFolder: FolderOverlay? = null
+    private var camFolder: FolderOverlay? = null
+    private var trafficOverlay: TilesOverlay? = null
+    private var trafficAt = 0L
+    private var roadAt = 0L
+    private var camsAt = 0L
+    private var roadDirty = true
+    private val roadIcons = HashMap<String, android.graphics.drawable.BitmapDrawable>()
+    private var camJob: kotlinx.coroutines.Job? = null
+    private val keyStore get() = com.abyss.app.core.ServiceLocator.keyStore
+
+    fun roadKeys() = RoadKeys(keyStore.getKey(KEY_TOMTOM), keyStore.getKey(KEY_HERE), keyStore.getKey(KEY_WINDY))
+    fun keyOf(id: String): String = keyStore.getKey(id) ?: ""
+
+    fun saveKey(id: String, value: String) {
+        keyStore.setKey(id, value)
+        keyVersion++
+        roadAt = 0L; camsAt = 0L; roadDirty = true; dirty = true; lastFetch = 0L
+        if (id == KEY_TOMTOM && trafficOn) refreshTraffic()
+    }
+
+    private fun box(): GeoBox? {
+        val bb = map?.boundingBox ?: return null
+        return GeoBox(bb.latNorth, bb.latSouth, bb.lonEast, bb.lonWest)
+    }
+
+    fun toggleTraffic() {
+        trafficOn = !trafficOn
+        prefs.edit().putBoolean("traffic", trafficOn).apply()
+        if (trafficOn) refreshTraffic() else removeTraffic()
+    }
+
+    fun toggleRoad() {
+        roadOn = !roadOn
+        prefs.edit().putBoolean("road", roadOn).apply()
+        if (roadOn) { roadAt = 0L; roadDirty = true; dirty = true; lastFetch = 0L }
+        else { roadFolder?.items?.clear(); roadIncidents = emptyList(); roadStatus = emptyMap(); selectedRoad = null; map?.invalidate() }
+    }
+
+    fun toggleCams() {
+        camsOn = !camsOn
+        prefs.edit().putBoolean("cams", camsOn).apply()
+        if (camsOn) { camsAt = 0L; roadDirty = true; dirty = true; lastFetch = 0L }
+        else { camFolder?.items?.clear(); roadCams = emptyList(); camStatus = emptyMap(); selectedCam = null; map?.invalidate() }
+    }
+
+    /** TomTom live flow tiles; the tile-set name rolls every 2 min so the cache never serves stale traffic. */
+    private fun refreshTraffic() {
+        val mv = map ?: return
+        val key = keyStore.getKey(KEY_TOMTOM)
+        removeTraffic()
+        if (key == null) return
+        val now = System.currentTimeMillis()
+        trafficAt = now
+        val (base, ending) = RoadApi.tomtomFlowTiles(key, dark == true)
+        val provider = MapTileProviderBasic(app)
+        provider.setTileSource(XYTileSource(
+            "tt-flow-" + (if (dark == true) "d-" else "l-") + (now / 120_000L), 0, 22, 256, ending, arrayOf(base),
+        ))
+        val ov = TilesOverlay(provider, app)
+        ov.loadingBackgroundColor = AndroidColor.TRANSPARENT
+        ov.loadingLineColor = AndroidColor.TRANSPARENT
+        trafficOverlay = ov
+        mv.overlays.add(0, ov)
+        mv.invalidate()
+    }
+
+    private fun removeTraffic() {
+        val mv = map ?: return
+        trafficOverlay?.let { mv.overlays.remove(it); it.onDetach(mv) }
+        trafficOverlay = null
+        mv.invalidate()
+    }
+
+    private suspend fun refreshRoads() {
+        val b = box() ?: return
+        val res = runCatching { RoadApi.incidents(b, currentLang, roadKeys()) }.getOrNull() ?: return
+        if (!roadOn) return
+        roadStatus = res.perSource
+        roadIncidents = res.items.sortedByDescending { RoadLogic.rank(it) }
+        selectedRoad?.let { s -> roadIncidents.firstOrNull { it.id == s.id }?.let { selectedRoad = it } }
+        drawRoads()
+    }
+
+    private fun drawRoads() {
+        val mv = map ?: return
+        val folder = roadFolder ?: return
+        folder.items.clear()
+        val d = app.resources.displayMetrics.density
+        // Lowest priority first, so accidents and closures sit on top.
+        for (inc in roadIncidents.asReversed()) {
+            val color = roadColor(inc)
+            inc.line?.let { ln ->
+                val pl = Polyline()
+                pl.setPoints(ln.map { GeoPoint(it[0], it[1]) })
+                pl.outlinePaint.color = color
+                pl.outlinePaint.strokeWidth = (if (inc.kind == RoadKind.Jam) 5.5f else 4.5f) * d
+                pl.outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                pl.outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                if (inc.kind == RoadKind.Closure || inc.kind == RoadKind.Roadworks) {
+                    pl.outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(10f * d, 6f * d), 0f)
+                }
+                pl.setOnClickListener { _, _, _ -> openRoad(inc); true }
+                folder.add(pl)
+            }
+            if (inc.kind != RoadKind.Jam || inc.line == null || inc.severity >= 3) {
+                val m = Marker(mv)
+                m.position = GeoPoint(inc.lat, inc.lon)
+                m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                m.icon = badge("r-${inc.kind}-${inc.severity}", roadEmoji(inc.kind), color, null)
+                m.setOnMarkerClickListener { _, _ -> openRoad(inc); true }
+                folder.add(m)
+            }
+        }
+        mv.invalidate()
+    }
+
+    private suspend fun refreshCams() {
+        val mv = map ?: return
+        val b = box() ?: return
+        val z = mv.zoomLevelDouble
+        val res = runCatching { RoadApi.cameras(b, z, currentLang, roadKeys()) }.getOrNull() ?: return
+        if (!camsOn) return
+        camsTooFar = z < 9.0
+        camStatus = res.perSource
+        roadCams = res.items
+        selectedCam?.let { s -> roadCams.firstOrNull { it.id == s.id }?.let { selectedCam = it } }
+        val folder = camFolder ?: return
+        folder.items.clear()
+        val d = app.resources.displayMetrics.density
+        for (c in res.items) {
+            if (c.kind == CamKind.AvgSpeed && c.endLat != null && c.endLon != null) {
+                val pl = Polyline()
+                pl.setPoints(listOf(GeoPoint(c.lat, c.lon), GeoPoint(c.endLat, c.endLon)))
+                pl.outlinePaint.color = 0xCC3B82F6.toInt()
+                pl.outlinePaint.strokeWidth = 3f * d
+                pl.outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(6f * d, 6f * d), 0f)
+                pl.setOnClickListener { _, _, _ -> openCam(c); true }
+                folder.add(pl)
+            }
+            val m = Marker(mv)
+            m.position = GeoPoint(c.lat, c.lon)
+            m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            val speed = c.maxSpeed?.filter { it.isDigit() }?.take(3)?.ifEmpty { null }
+            m.icon = when (c.kind) {
+                CamKind.Speed -> if (speed != null) badge("cs-$speed", null, 0xFFE5484D.toInt(), speed) else badge("cs", "📸", 0xFFE5484D.toInt(), null)
+                CamKind.AvgSpeed -> if (speed != null) badge("ca-$speed", null, 0xFF3B82F6.toInt(), speed) else badge("ca", "📸", 0xFF3B82F6.toInt(), null)
+                CamKind.RedLight -> badge("cr", "🚦", 0xFFE5484D.toInt(), null)
+                CamKind.Traffic -> badge("ct", "📹", 0xFF64748B.toInt(), null)
+                CamKind.Live -> badge("cl", "📷", 0xFF22C55E.toInt(), null)
+            }
+            m.setOnMarkerClickListener { _, _ -> openCam(c); true }
+            folder.add(m)
+        }
+        mv.invalidate()
+    }
+
+    fun openRoad(inc: RoadIncident) {
+        select(null); clearPin(); selectedEvent = null; selectedCam = null
+        selectedRoad = inc
+    }
+
+    fun focusRoad(inc: RoadIncident) {
+        roadListOpen = false
+        openRoad(inc)
+        flyTo(inc.lat, inc.lon, (map?.zoomLevelDouble ?: 12.0).coerceAtLeast(13.0))
+    }
+
+    fun openCam(c: RoadCamera) {
+        select(null); clearPin(); selectedEvent = null; selectedRoad = null
+        selectedCam = c
+        camBitmap = null
+        reloadCamImage()
+    }
+
+    fun reloadCamImage() {
+        val c = selectedCam ?: return
+        val url = c.imageUrl ?: return
+        camJob?.cancel()
+        camLoading = true
+        camJob = scope.launch {
+            // Bust caches: these images refresh every few minutes.
+            val sep = if ('?' in url) '&' else '?'
+            val bytes = RoadApi.fetchBytes(url + sep + "t=" + (System.currentTimeMillis() / 30_000L))
+                ?: RoadApi.fetchBytes(url)
+            val bmp = bytes?.let { b -> runCatching { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }.getOrNull() }
+            if (selectedCam?.id == c.id) { camBitmap = bmp; camLoading = false }
+        }
+    }
+
+    private fun roadColor(i: RoadIncident): Int = when (i.kind) {
+        RoadKind.Jam -> when (i.severity) { 1 -> 0xFFF5C518; 2 -> 0xFFFF8A00; 3 -> 0xFFE5484D; else -> 0xFFB42318 }.toInt()
+        RoadKind.Accident -> 0xFFE5484D.toInt()
+        RoadKind.Closure -> 0xFFB42318.toInt()
+        RoadKind.LaneClosed -> 0xFFFF8A00.toInt()
+        RoadKind.Roadworks -> 0xFFF59E0B.toInt()
+        RoadKind.Hazard -> 0xFFEAB308.toInt()
+        RoadKind.Weather -> 0xFF4AA3FF.toInt()
+        RoadKind.Breakdown -> 0xFFA855F7.toInt()
+        RoadKind.Event -> 0xFF22C55E.toInt()
+        RoadKind.Other -> 0xFF94A3B8.toInt()
+    }
+
+    /** Round map badge: an emoji, or a speed-limit number in a road-sign ring. */
+    private fun badge(key: String, emoji: String?, ring: Int, number: String?): android.graphics.drawable.BitmapDrawable =
+        roadIcons.getOrPut(key) {
+            val d = app.resources.displayMetrics.density
+            val size = ((if (number != null) 28f else 26f) * d).toInt()
+            val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+            val cv = android.graphics.Canvas(bmp)
+            val r = size / 2f
+            val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            p.color = 0x55000000
+            cv.drawCircle(r, r + 0.8f * d, r - 0.5f * d, p)
+            p.color = AndroidColor.WHITE
+            cv.drawCircle(r, r, r - 1.2f * d, p)
+            p.style = android.graphics.Paint.Style.STROKE
+            p.strokeWidth = (if (number != null) 3.2f else 2.4f) * d
+            p.color = ring
+            cv.drawCircle(r, r, r - 1.2f * d - p.strokeWidth / 2f, p)
+            p.style = android.graphics.Paint.Style.FILL
+            p.textAlign = android.graphics.Paint.Align.CENTER
+            if (number != null) {
+                p.color = AndroidColor.BLACK
+                p.typeface = android.graphics.Typeface.DEFAULT_BOLD
+                p.textSize = (if (number.length >= 3) 10.5f else 12.5f) * d
+            } else {
+                p.textSize = 13f * d
+            }
+            val fm = p.fontMetrics
+            cv.drawText(number ?: emoji ?: "", r, r - (fm.ascent + fm.descent) / 2f, p)
+            android.graphics.drawable.BitmapDrawable(app.resources, bmp)
+        }
+
     fun resetNorth() {
         if (map == null) return
         syncCam()
@@ -1025,9 +1324,13 @@ fun RadarScreen(palette: AbyssPalette) {
         }
     }
 
-    BackHandler(enabled = active && (ctl.selected != null || ctl.selectedEvent != null || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
+    BackHandler(enabled = active && (ctl.selected != null || ctl.selectedEvent != null || ctl.selectedRoad != null ||
+        ctl.selectedCam != null || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
         when {
             ctl.sheetOpen -> ctl.sheetOpen = false
+            ctl.roadListOpen -> ctl.roadListOpen = false
+            ctl.selectedCam != null -> ctl.selectedCam = null
+            ctl.selectedRoad != null -> ctl.selectedRoad = null
             ctl.results != null -> ctl.results = null
             ctl.placeResults != null -> ctl.placeResults = null
             ctl.measuring -> ctl.toggleMeasure()
@@ -1147,6 +1450,34 @@ fun RadarScreen(palette: AbyssPalette) {
             AnimatedVisibility(ev != null && ctl.selected == null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
                 if (ev != null) EventCard(ev, palette, S, onOpen = { ctl.openUrl(ev.url) }, onClose = { ctl.selectedEvent = null })
             }
+            val rd = ctl.selectedRoad
+            AnimatedVisibility(rd != null && ctl.selected == null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
+                if (rd != null) RoadCard(rd, ctl.metric, palette, S, onOpen = { ctl.openUrl(rd.url) }, onClose = { ctl.selectedRoad = null })
+            }
+            val cm = ctl.selectedCam
+            AnimatedVisibility(cm != null && ctl.selected == null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
+                if (cm != null) CameraCard(cm, ctl.camBitmap, ctl.camLoading, palette, S,
+                    onRefresh = { ctl.reloadCamImage() }, onOpen = { ctl.openUrl(cm.pageUrl) }, onClose = { ctl.selectedCam = null })
+            }
+            if (ctl.roadOn && ctl.roadIncidents.isNotEmpty() && ctl.selectedRoad == null && ctl.selected == null && ctl.selectedCam == null) {
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    Modifier.clip(RoundedCornerShape(14.dp)).background(palette.surface.copy(alpha = 0.92f))
+                        .border(1.dp, palette.outline, RoundedCornerShape(14.dp))
+                        .clickable { ctl.roadListOpen = true }.padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Warning, null, tint = Color(0xFFF59E0B), modifier = Modifier.size(15.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(S.roadList(ctl.roadIncidents.size), color = palette.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+            if (ctl.camsOn && ctl.camsTooFar) {
+                Spacer(Modifier.height(6.dp))
+                Text(S.roadZoomForCams, color = palette.onSurface.copy(alpha = 0.7f), fontSize = 11.5.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(palette.surface.copy(alpha = 0.85f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp))
+            }
             val showPin = ctl.pin != null && ctl.selected == null && ctl.selectedEvent == null
             AnimatedVisibility(showPin, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
                 ctl.pin?.let { pt ->
@@ -1173,6 +1504,16 @@ fun RadarScreen(palette: AbyssPalette) {
         ) {
             LayerSheet(ctl, palette, S)
         }
+        AnimatedVisibility(ctl.roadListOpen, enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
+                .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { ctl.roadListOpen = false })
+        }
+        AnimatedVisibility(
+            ctl.roadListOpen, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut(),
+        ) {
+            RoadListSheet(ctl.roadIncidents, ctl.metric, palette, S) { ctl.focusRoad(it) }
+        }
 
         // Long-press hint, shown briefly when the map is idle and empty-handed.
         if (!ctl.sheetOpen && ctl.selected == null && ctl.pin == null && ctl.selectedEvent == null && !ctl.measuring) {
@@ -1186,9 +1527,11 @@ fun RadarScreen(palette: AbyssPalette) {
 private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) {
     Column(
         Modifier.fillMaxWidth().navigationBarsPadding()
+            .heightIn(max = 620.dp)
             .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
             .background(palette.surface)
             .border(1.dp, palette.outline, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+            .verticalScroll(rememberScrollState())
             .padding(18.dp),
     ) {
         Box(Modifier.align(Alignment.CenterHorizontally).size(width = 34.dp, height = 4.dp)
@@ -1212,6 +1555,8 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) 
         ToggleRow(Icons.Filled.MenuBook, S.radarOverlayWiki, ctl.wikiOn, palette) { ctl.toggleWiki() }
         ToggleRow(Icons.Filled.Bolt, S.radarOverlayEvents, ctl.eventsOn, palette) { ctl.toggleEvents() }
         ToggleRow(Icons.Filled.DarkMode, S.radarOverlayTerminator, ctl.terminatorOn, palette) { ctl.toggleTerminator() }
+        Spacer(Modifier.height(18.dp))
+        RoadSection(ctl, palette, S)
         Spacer(Modifier.height(18.dp))
         Text(S.radarSources, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
         Spacer(Modifier.height(6.dp))
@@ -1735,4 +2080,304 @@ private fun MapGestureLayer(ctl: RadarController) {
             }
         }
     })
+}
+
+// ============================================================ roads UI
+
+@Composable
+private fun RoadSection(ctl: RadarController, palette: AbyssPalette, S: Strings) {
+    @Suppress("UNUSED_VARIABLE") val kv = ctl.keyVersion   // recompose when keys change
+    val keys = ctl.roadKeys()
+    Text(S.roadSection, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
+    Spacer(Modifier.height(6.dp))
+    val trafficLabel = if (keys.tomtom == null) S.roadTraffic + " · " + S.roadNeedKey("TomTom") else S.roadTraffic
+    ToggleRow(Icons.Filled.Traffic, trafficLabel, ctl.trafficOn, palette) { ctl.toggleTraffic() }
+    val n = ctl.roadIncidents.size
+    ToggleRow(Icons.Filled.Warning, if (ctl.roadOn) "${S.roadIncidents} · $n" else S.roadIncidents, ctl.roadOn, palette) { ctl.toggleRoad() }
+    if (ctl.roadOn) SourceLine(ctl.roadStatus, palette)
+    val c = ctl.roadCams.size
+    ToggleRow(Icons.Filled.Videocam, if (ctl.camsOn) "${S.roadCameras} · $c" else S.roadCameras, ctl.camsOn, palette) { ctl.toggleCams() }
+    if (ctl.camsOn) SourceLine(ctl.camStatus, palette)
+
+    Spacer(Modifier.height(12.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Filled.VpnKey, null, tint = palette.primary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(S.roadKeys, color = palette.onBackground, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    }
+    Text(S.roadKeysHint, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp, lineHeight = 16.sp,
+        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
+    KeyField("TomTom", "tomtom", "https://developer.tomtom.com/", ctl, palette, S)
+    KeyField("HERE", "here", "https://platform.here.com/", ctl, palette, S)
+    KeyField("Windy Webcams", "windy", "https://api.windy.com/keys", ctl, palette, S)
+}
+
+@Composable
+private fun SourceLine(status: Map<String, Int?>, palette: AbyssPalette) {
+    if (status.isEmpty()) return
+    val txt = status.entries.joinToString("  ·  ") { (k, v) -> if (v == null) "$k ✕" else "$k $v" }
+    Text(txt, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 11.5.sp, lineHeight = 15.sp,
+        modifier = Modifier.padding(start = 36.dp, bottom = 4.dp))
+}
+
+@Composable
+private fun KeyField(label: String, id: String, getUrl: String, ctl: RadarController, palette: AbyssPalette, S: Strings) {
+    var value by remember(id, ctl.keyVersion) { mutableStateOf(ctl.keyOf(id)) }
+    val saved = ctl.keyOf(id)
+    val focus = LocalFocusManager.current
+    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = palette.onSurface, fontSize = 13.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            if (saved.isNotEmpty() && value == saved) Text("✓", color = Color(0xFF5DBB7B), fontSize = 13.sp)
+            Spacer(Modifier.width(10.dp))
+            Text(S.roadGetKey, color = palette.primary, fontSize = 12.5.sp,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { ctl.openUrl(getUrl) }.padding(horizontal = 6.dp, vertical = 3.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(12.dp)).background(palette.surfaceVariant)
+                    .border(1.dp, palette.outline, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                BasicTextField(
+                    value = value, onValueChange = { value = it.trim() }, singleLine = true,
+                    textStyle = TextStyle(color = palette.onSurface, fontSize = 13.sp),
+                    cursorBrush = SolidColor(palette.primary),
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { ctl.saveKey(id, value); focus.clearFocus() }),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (value != saved) {
+                Spacer(Modifier.width(8.dp))
+                Text(S.roadSaveKey, color = palette.onPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(palette.primary)
+                        .clickable { ctl.saveKey(id, value); focus.clearFocus() }.padding(horizontal = 14.dp, vertical = 10.dp))
+            }
+        }
+    }
+}
+
+private fun roadKindLabel(k: RoadKind, S: Strings) = when (k) {
+    RoadKind.Accident -> S.roadKindAccident; RoadKind.Jam -> S.roadKindJam; RoadKind.Closure -> S.roadKindClosure
+    RoadKind.LaneClosed -> S.roadKindLaneClosed; RoadKind.Roadworks -> S.roadKindRoadworks; RoadKind.Hazard -> S.roadKindHazard
+    RoadKind.Weather -> S.roadKindWeather; RoadKind.Breakdown -> S.roadKindBreakdown; RoadKind.Event -> S.roadKindEvent
+    RoadKind.Other -> S.roadKindOther
+}
+
+private fun severityLabel(sev: Int, S: Strings): String? = when (sev) {
+    1 -> S.roadSevMinor; 2 -> S.roadSevModerate; 3 -> S.roadSevMajor; 4 -> S.roadSevClosed; else -> null
+}
+
+private fun roadUiColor(i: RoadIncident): Color = when (i.kind) {
+    RoadKind.Jam -> when (i.severity) { 1 -> Color(0xFFD9A800); 2 -> Color(0xFFFF8A00); 3 -> Color(0xFFE5484D); else -> Color(0xFFB42318) }
+    RoadKind.Accident -> Color(0xFFE5484D); RoadKind.Closure -> Color(0xFFB42318); RoadKind.LaneClosed -> Color(0xFFFF8A00)
+    RoadKind.Roadworks -> Color(0xFFF59E0B); RoadKind.Hazard -> Color(0xFFD9A800); RoadKind.Weather -> Color(0xFF4AA3FF)
+    RoadKind.Breakdown -> Color(0xFFA855F7); RoadKind.Event -> Color(0xFF22C55E); RoadKind.Other -> Color(0xFF94A3B8)
+}
+
+private fun isoTime(iso: String?, S: Strings): String? {
+    iso ?: return null
+    val inst = runCatching { java.time.OffsetDateTime.parse(iso).toInstant() }.getOrNull()
+        ?: runCatching { java.time.Instant.parse(iso) }.getOrNull()
+        ?: runCatching { java.time.LocalDateTime.parse(iso).atZone(java.time.ZoneId.systemDefault()).toInstant() }.getOrNull()
+        ?: return iso
+    return java.time.format.DateTimeFormatter.ofPattern("d MMM, HH:mm", S.locale)
+        .withZone(java.time.ZoneId.systemDefault()).format(inst)
+}
+
+private fun lengthText(m: Double, metric: Boolean, S: Strings): String =
+    if (metric) { if (m < 1000) "%d m".format(S.locale, m.roundToInt()) else "%.1f %s".format(S.locale, m / 1000, S.unitKm) }
+    else "%.1f mi".format(S.locale, m / 1609.344)
+
+@Composable
+private fun RoadCard(i: RoadIncident, metric: Boolean, palette: AbyssPalette, S: Strings, onOpen: () -> Unit, onClose: () -> Unit) {
+    val col = roadUiColor(i)
+    Column(
+        Modifier.fillMaxWidth().heightIn(max = 420.dp).clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
+            .border(1.dp, palette.outline, RoundedCornerShape(22.dp)).verticalScroll(rememberScrollState()).padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(34.dp).clip(CircleShape).background(col.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                Text(roadEmoji(i.kind), fontSize = 17.sp)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(roadKindLabel(i.kind, S), color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 18.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 3.dp)) {
+                    severityLabel(i.severity, S)?.let { Tag(it, col, palette) }
+                    if (i.unconfirmed) Tag(S.roadUnconfirmed, palette.onSurface.copy(alpha = 0.6f), palette)
+                }
+            }
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+            }
+        }
+        if (!i.title.isNullOrBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(i.title, color = palette.onBackground, fontSize = 15.sp, lineHeight = 20.sp)
+        }
+        val roadLine = listOfNotNull(i.road, listOfNotNull(i.from, i.to).joinToString(" → ").ifBlank { null }).joinToString(" · ")
+        if (roadLine.isNotBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(roadLine, color = palette.onSurface.copy(alpha = 0.7f), fontSize = 13.sp, lineHeight = 18.sp)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            i.delaySec?.takeIf { it > 0 }?.let { Stat(S.roadDelayLabel, S.roadDelay((it + 30) / 60), palette, Modifier.weight(1f)) }
+            i.lengthM?.takeIf { it > 0 }?.let { Stat(S.roadLengthLabel, lengthText(it, metric, S), palette, Modifier.weight(1f)) }
+        }
+        isoTime(i.start, S)?.let { DetailRow(S.roadStart, it, palette) }
+        isoTime(i.end, S)?.let { DetailRow(S.roadEnd, it, palette) }
+        i.reports?.takeIf { it > 0 }?.let { DetailRow("", S.roadReports(it), palette) }
+        for (d in i.details.take(6)) {
+            Text("• $d", color = palette.onSurface.copy(alpha = 0.75f), fontSize = 13.sp, lineHeight = 18.sp,
+                modifier = Modifier.padding(top = 4.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(S.roadSourceLabel + ": " + i.sources.joinToString(", "), color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.5.sp)
+        if (i.url != null) {
+            Spacer(Modifier.height(10.dp))
+            WideButton(Icons.Filled.OpenInNew, S.camOpen, palette, onOpen)
+        }
+    }
+}
+
+@Composable
+private fun Stat(label: String, value: String, palette: AbyssPalette, modifier: Modifier) {
+    Column(modifier.clip(RoundedCornerShape(12.dp)).background(palette.surfaceVariant).padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Text(label, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 11.sp)
+        Text(value, color = palette.onBackground, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String, palette: AbyssPalette) {
+    Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        if (label.isNotEmpty()) Text(label, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 13.sp, modifier = Modifier.width(110.dp))
+        Text(value, color = palette.onSurface, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun WideButton(icon: ImageVector, text: String, palette: AbyssPalette, onClick: () -> Unit, modifier: Modifier = Modifier.fillMaxWidth()) {
+    Row(
+        modifier.clip(RoundedCornerShape(14.dp)).background(palette.primary).clickable(onClick = onClick).padding(vertical = 11.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = palette.onPrimary, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(text, color = palette.onPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+private fun camKindLabel(k: CamKind, S: Strings) = when (k) {
+    CamKind.Speed -> S.camSpeed; CamKind.RedLight -> S.camRedLight; CamKind.AvgSpeed -> S.camAvgSpeed
+    CamKind.Traffic -> S.camTraffic; CamKind.Live -> S.camLive
+}
+
+private fun directionText(d: String): String {
+    val v = d.trim().toDoubleOrNull() ?: return d
+    val names = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+    val i = (((v % 360 + 360) % 360 + 22.5) / 45).toInt() % 8
+    return "${v.roundToInt()}° (${names[i]})"
+}
+
+@Composable
+private fun CameraCard(
+    c: RoadCamera, bmp: ImageBitmap?, loading: Boolean, palette: AbyssPalette, S: Strings,
+    onRefresh: () -> Unit, onOpen: () -> Unit, onClose: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
+            .border(1.dp, palette.outline, RoundedCornerShape(22.dp)).padding(16.dp),
+    ) {
+        if (c.imageUrl != null) {
+            Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)).background(palette.surfaceVariant)
+                .clickable(onClick = onOpen), contentAlignment = Alignment.Center) {
+                if (bmp != null) Image(bmp, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Text(if (loading) S.radarLoading else "📷", color = palette.onSurface.copy(alpha = 0.5f), fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            val speed = c.maxSpeed?.filter { it.isDigit() }?.take(3)?.ifEmpty { null }
+            if (speed != null && (c.kind == CamKind.Speed || c.kind == CamKind.AvgSpeed)) {
+                Box(Modifier.size(44.dp).clip(CircleShape).background(Color.White)
+                    .border(4.dp, if (c.kind == CamKind.AvgSpeed) Color(0xFF3B82F6) else Color(0xFFE5484D), CircleShape),
+                    contentAlignment = Alignment.Center) {
+                    Text(speed, color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(12.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(camKindLabel(c.kind, S), color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 18.sp)
+                c.title?.let { Text(it, color = palette.onSurface.copy(alpha = 0.7f), fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            }
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+            }
+        }
+        c.maxSpeed?.let { DetailRow(S.camLimit, it, palette) }
+        c.direction?.let { DetailRow(S.camDirection, directionText(it), palette) }
+        c.ref?.let { DetailRow("Ref", it, palette) }
+        c.operator?.let { DetailRow("", it, palette) }
+        DetailRow(S.radarCoordinates, "%.5f, %.5f".format(java.util.Locale.US, c.lat, c.lon), palette)
+        Spacer(Modifier.height(8.dp))
+        Text(S.roadSourceLabel + ": " + c.source, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.5.sp)
+        if (c.imageUrl != null || c.pageUrl != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (c.imageUrl != null) WideButton(Icons.Filled.Refresh, S.camRefresh, palette, onRefresh, Modifier.weight(1f))
+                if (c.pageUrl != null) WideButton(Icons.Filled.OpenInNew, S.camOpen, palette, onOpen, Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoadListSheet(list: List<RoadIncident>, metric: Boolean, palette: AbyssPalette, S: Strings, onPick: (RoadIncident) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding().heightIn(max = 560.dp)
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(palette.surface)
+            .border(1.dp, palette.outline, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+            .padding(top = 14.dp),
+    ) {
+        Box(Modifier.align(Alignment.CenterHorizontally).size(width = 34.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp)).background(palette.outline))
+        Text(S.roadList(list.size), color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp,
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp))
+        if (list.isEmpty()) {
+            Text(S.roadNone, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 14.sp, modifier = Modifier.padding(18.dp))
+        } else LazyColumn {
+            items(list, key = { it.id }) { i ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onPick(i) }.padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(32.dp).clip(CircleShape).background(roadUiColor(i).copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                        Text(roadEmoji(i.kind), fontSize = 15.sp)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(roadKindLabel(i.kind, S), color = palette.onSurface, fontSize = 14.5.sp, fontWeight = FontWeight.Medium)
+                            i.delaySec?.takeIf { it > 0 }?.let {
+                                Spacer(Modifier.width(8.dp)); Tag(S.roadDelay((it + 30) / 60), roadUiColor(i), palette)
+                            }
+                        }
+                        val sub = listOfNotNull(i.road, i.title).joinToString(" · ")
+                        if (sub.isNotBlank()) Text(sub, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.5.sp,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    i.lengthM?.takeIf { it > 0 }?.let {
+                        Text(lengthText(it, metric, S), color = palette.onSurface.copy(alpha = 0.5f), fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+    }
 }
