@@ -75,6 +75,9 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -290,6 +293,7 @@ private class RadarController(private val app: Context, private val scope: Corou
     var sheltersTooFar by mutableStateOf(false)
     var findingShelter by mutableStateOf(false)
     var nearestShelters by mutableStateOf<List<Shelter>?>(null)
+    var alertsBg by mutableStateOf(false)
     var planesOn by mutableStateOf(true)
     var sheetOpen by mutableStateOf(false)
 
@@ -389,6 +393,8 @@ private class RadarController(private val app: Context, private val scope: Corou
         camsOn = prefs.getBoolean("cams", false)
         alertsOn = prefs.getBoolean("alerts", false)
         sheltersOn = prefs.getBoolean("shelters", false)
+        alertsBg = prefs.getBoolean("alerts_bg", false)
+        if (alertsBg) com.abyss.app.feature.radar.AlertService.start(app)
         dark = null   // force first tile source
         applyLayer()
         applyPalette(palette)
@@ -1119,6 +1125,31 @@ private class RadarController(private val app: Context, private val scope: Corou
         else { alertState = null }
     }
 
+    /** Background warnings while the app is closed (silent: vibration + pop-up). */
+    fun toggleBackgroundAlerts() {
+        alertsBg = !alertsBg
+        prefs.edit().putBoolean("alerts_bg", alertsBg).apply()
+        if (alertsBg) {
+            if (!alertsOn) toggleAlerts()
+            // Seed the service with where we are so it can match our region.
+            (me ?: map?.let { doubleArrayOf(it.mapCenter.latitude, it.mapCenter.longitude) })?.let {
+                prefs.edit().putFloat("alert_lat", it[0].toFloat()).putFloat("alert_lon", it[1].toFloat()).apply()
+            }
+            com.abyss.app.feature.radar.AlertService.start(app)
+        } else {
+            com.abyss.app.feature.radar.AlertService.stop(app)
+        }
+    }
+
+    var alertHistory by mutableStateOf<List<com.abyss.app.feature.radar.AlertEvent>>(emptyList())
+    var historyOpen by mutableStateOf(false)
+
+    fun openHistory() {
+        alertHistory = com.abyss.app.feature.radar.AlertHistory
+            .decodeAll(prefs.getString("alert_history", null)).asReversed()
+        historyOpen = true
+    }
+
     fun toggleShelters() {
         sheltersOn = !sheltersOn
         prefs.edit().putBoolean("shelters", sheltersOn).apply()
@@ -1136,16 +1167,34 @@ private class RadarController(private val app: Context, private val scope: Corou
         var region = alertState?.myRegion
         var mine: RegionAlert? = null
         val here = me ?: map?.let { doubleArrayOf(it.mapCenter.latitude, it.mapCenter.longitude) }
-        if (here != null && (region == null || now - alertRegionAt > 10 * 60_000L)) {
+        if (here != null) {
+            val fresh = region == null || now - alertRegionAt > 10 * 60_000L
             val r = runCatching { GeoApi.regionOf(here[0], here[1]) }.getOrNull()
             if (r != null) {
-                alertRegionAt = now
-                region = r.city ?: r.state
-                mine = AlertLogic.matchRegion(r.state, r.city, r.country, list)
+                if (fresh) alertRegionAt = now
+                region = r.city ?: r.municipality ?: r.county ?: r.state
+                mine = AlertLogic.matchRegion(r.state, r.county, r.municipality, r.city, r.country, list)
+                // Keep the background service's idea of our region in sync.
+                com.abyss.app.feature.radar.RegionNames.of(r).save(prefs)
+                prefs.edit().putFloat("alert_lat", here[0].toFloat()).putFloat("alert_lon", here[1].toFloat()).apply()
             }
-        } else if (here != null) {
-            val r = runCatching { GeoApi.regionOf(here[0], here[1]) }.getOrNull()
-            mine = if (r != null) AlertLogic.matchRegion(r.state, r.city, r.country, list) else null
+        }
+        // Record a local history entry on each transition for our region.
+        val prevLevel = prefs.getString("alert_last_level", "none") ?: "none"
+        val curLevel = mine?.level?.name?.lowercase() ?: "none"
+        if (curLevel != prevLevel) {
+            if (mine != null && prevLevel == "none") {
+                prefs.edit().putLong("alert_started", now).putString("alert_last_kind", mine.kind.name).apply()
+            } else if (mine == null && prevLevel != "none") {
+                val kind = prefs.getString("alert_last_kind", "") ?: ""
+                val hist = com.abyss.app.feature.radar.AlertHistory.decodeAll(prefs.getString("alert_history", null)) +
+                    com.abyss.app.feature.radar.AlertEvent(kind, prevLevel, region ?: "",
+                        prefs.getLong("alert_started", now), now)
+                prefs.edit().putString("alert_history", com.abyss.app.feature.radar.AlertHistory.encodeAll(hist)).apply()
+            } else if (mine != null) {
+                prefs.edit().putString("alert_last_kind", mine.kind.name).apply()
+            }
+            prefs.edit().putString("alert_last_level", curLevel).apply()
         }
         alertState = AlertState(list.sortedWith(AlertLogic::worseFirst), now, ok = true, mine = mine, myRegion = region)
     }
@@ -1482,15 +1531,17 @@ fun RadarScreen(palette: AbyssPalette) {
             ctl.locationDenied = true
         }
     }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     BackHandler(enabled = active && (ctl.selected != null || ctl.selectedEvent != null || ctl.selectedRoad != null ||
-        ctl.selectedCam != null || ctl.selectedShelter != null || ctl.nearestShelters != null || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
+        ctl.selectedCam != null || ctl.selectedShelter != null || ctl.nearestShelters != null || ctl.historyOpen || ctl.roadListOpen || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
         when {
             ctl.sheetOpen -> ctl.sheetOpen = false
             ctl.roadListOpen -> ctl.roadListOpen = false
             ctl.selectedCam != null -> ctl.selectedCam = null
             ctl.selectedShelter != null -> ctl.selectedShelter = null
             ctl.nearestShelters != null -> ctl.clearNearest()
+            ctl.historyOpen -> ctl.historyOpen = false
             ctl.selectedRoad != null -> ctl.selectedRoad = null
             ctl.results != null -> ctl.results = null
             ctl.placeResults != null -> ctl.placeResults = null
@@ -1676,7 +1727,7 @@ fun RadarScreen(palette: AbyssPalette) {
             ctl.sheetOpen, modifier = Modifier.align(Alignment.BottomCenter),
             enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut(),
         ) {
-            LayerSheet(ctl, palette, S)
+            LayerSheet(ctl, palette, S, onNeedNotif = { notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS) })
         }
         AnimatedVisibility(ctl.roadListOpen, enter = fadeIn(), exit = fadeOut()) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
@@ -1695,6 +1746,14 @@ fun RadarScreen(palette: AbyssPalette) {
                 onPick = { ctl.openShelter(it); ctl.flyTo(it.lat, it.lon, (ctl.map?.zoomLevelDouble ?: 16.0).coerceAtLeast(16.0)) },
                 onRoute = { ctl.routeTo(it) }, onClose = { ctl.clearNearest() })
         }
+        AnimatedVisibility(ctl.historyOpen, enter = fadeIn(), exit = fadeOut()) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f))
+                .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { ctl.historyOpen = false })
+        }
+        AnimatedVisibility(ctl.historyOpen, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+            HistorySheet(ctl.alertHistory, palette, S) { ctl.historyOpen = false }
+        }
 
         // Long-press hint, shown briefly when the map is idle and empty-handed.
         if (!ctl.sheetOpen && ctl.selected == null && ctl.pin == null && ctl.selectedEvent == null && !ctl.measuring) {
@@ -1705,7 +1764,7 @@ fun RadarScreen(palette: AbyssPalette) {
 }
 
 @Composable
-private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) {
+private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings, onNeedNotif: () -> Unit) {
     Column(
         Modifier.fillMaxWidth().navigationBarsPadding()
             .heightIn(max = 620.dp)
@@ -1737,7 +1796,7 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) 
         ToggleRow(Icons.Filled.Bolt, S.radarOverlayEvents, ctl.eventsOn, palette) { ctl.toggleEvents() }
         ToggleRow(Icons.Filled.DarkMode, S.radarOverlayTerminator, ctl.terminatorOn, palette) { ctl.toggleTerminator() }
         Spacer(Modifier.height(18.dp))
-        SafetySection(ctl, palette, S)
+        SafetySection(ctl, palette, S, onNeedNotifPermission = onNeedNotif)
         Spacer(Modifier.height(18.dp))
         RoadSection(ctl, palette, S)
         Spacer(Modifier.height(18.dp))
@@ -2568,7 +2627,7 @@ private fun RoadListSheet(list: List<RoadIncident>, metric: Boolean, palette: Ab
 // ============================================================ civil defence UI
 
 @Composable
-private fun SafetySection(ctl: RadarController, palette: AbyssPalette, S: Strings) {
+private fun SafetySection(ctl: RadarController, palette: AbyssPalette, S: Strings, onNeedNotifPermission: () -> Unit) {
     @Suppress("UNUSED_VARIABLE") val kv = ctl.keyVersion
     Text(S.safetySection, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp)
     Text(S.safetyHint, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp, lineHeight = 16.sp,
@@ -2577,6 +2636,22 @@ private fun SafetySection(ctl: RadarController, palette: AbyssPalette, S: String
     val alertLabel = if (!hasToken) S.safetyAlerts + " · " + S.safetyNeedToken else S.safetyAlerts
     ToggleRow(Icons.Filled.Campaign, alertLabel, ctl.alertsOn, palette) { ctl.toggleAlerts() }
     ToggleRow(Icons.Filled.Home, S.safetyShelters, ctl.sheltersOn, palette) { ctl.toggleShelters() }
+    ToggleRow(Icons.Filled.NotificationsActive, S.safetyBackground, ctl.alertsBg, palette) {
+        if (!ctl.alertsBg && android.os.Build.VERSION.SDK_INT >= 33) onNeedNotifPermission()
+        ctl.toggleBackgroundAlerts()
+    }
+    Text(S.safetyBackgroundHint, color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.5.sp, lineHeight = 15.sp,
+        modifier = Modifier.padding(start = 36.dp, bottom = 2.dp))
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { ctl.openHistory() }
+            .padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.History, null, tint = palette.onSurface.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(S.safetyHistory, color = palette.onSurface, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Icon(Icons.Filled.ChevronRight, null, tint = palette.onSurface.copy(alpha = 0.4f), modifier = Modifier.size(18.dp))
+    }
     Spacer(Modifier.height(6.dp))
     KeyField("alerts.in.ua", KEY_ALERTS, "https://alerts.in.ua/", ctl, palette, S)
 }
@@ -2732,4 +2807,53 @@ private fun NearestSheet(
         }
         Spacer(Modifier.height(10.dp))
     }
+}
+
+
+@Composable
+private fun HistorySheet(list: List<com.abyss.app.feature.radar.AlertEvent>, palette: AbyssPalette, S: Strings, onClose: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding().heightIn(max = 520.dp)
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(palette.surface)
+            .border(1.dp, palette.outline, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).padding(top = 14.dp),
+    ) {
+        Box(Modifier.align(Alignment.CenterHorizontally).size(width = 34.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp)).background(palette.outline))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.History, null, tint = palette.primary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(S.safetyHistory, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 19.sp, modifier = Modifier.weight(1f))
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(17.dp))
+            }
+        }
+        if (list.isEmpty()) {
+            Text(S.safetyNoHistory, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 14.sp,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
+        } else LazyColumn {
+            items(list) { e ->
+                val red = e.level.equals("red", true)
+                val fmt = java.text.SimpleDateFormat("d MMM, HH:mm", S.locale)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(10.dp).clip(CircleShape).background(if (red) Color(0xFFD32F2F) else Color(0xFFF5A623)))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(alertHistKind(e.kindName, S) + (if (e.region.isNotBlank()) " · " + e.region else ""),
+                            color = palette.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val span = if (e.endMs > e.startMs) {
+                            val dmin = ((e.endMs - e.startMs) / 60000L).coerceAtLeast(1)
+                            fmt.format(java.util.Date(e.startMs)) + " · " + dmin + " " + S.safetyMinShort
+                        } else fmt.format(java.util.Date(e.startMs))
+                        Text(span, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.5.sp)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+private fun alertHistKind(name: String, S: Strings): String = when (name) {
+    "AirRaid" -> S.alertAirRaid; "Artillery" -> S.alertArtillery; "UrbanFights" -> S.alertUrbanFights
+    "Chemical" -> S.alertChemical; "Nuclear" -> S.alertNuclear; else -> S.alertOther
 }

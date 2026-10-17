@@ -439,4 +439,18 @@ object StringsJa : Strings() {
     override val shelterGeneral = "避難所"
     override val shelterOperator = "運営者"
     override val shelterCapacity = "収容人数"
+
+    // ---- radar: civil defence background + history
+    override val safetyWatching = "警報を監視中"
+    override val safetyStopWatch = "オフにする"
+    override val safetyAllClear = "警報解除"
+    override val safetyNoAlert = "警報なし"
+    override val safetyPossible = "脅威の可能性"
+    override val safetyActive = "発令中の警報:"
+    override val safetyBackground = "バックグラウンド通知"
+    override val safetyBackgroundHint = "アプリを閉じていても通知（振動＋ポップアップ）"
+    override val safetyHistory = "警報履歴"
+    override val safetyNoHistory = "まだ記録がありません"
+    override val safetyOngoing = "現在"
+    override val safetyMinShort = "分"
 }

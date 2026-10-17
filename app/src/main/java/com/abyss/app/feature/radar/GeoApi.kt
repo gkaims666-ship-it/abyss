@@ -35,7 +35,13 @@ data class Place(
 data class WikiPlace(val title: String, val lat: Double, val lon: Double, val distM: Int, val lang: String)
 
 /** Administrative region at a point (used to match public alert status). */
-data class Region(val state: String?, val city: String?, val country: String?)
+data class Region(
+    val state: String?,
+    val county: String? = null,
+    val municipality: String? = null,
+    val city: String?,
+    val country: String?,
+)
 
 /** A real-world event pinned to the map (an earthquake, a reported news event…). */
 data class MapEvent(
@@ -88,16 +94,18 @@ object GeoApi {
         Place(name, display.substringAfter(",").trim().takeIf { it.isNotEmpty() }, lat, lon, o.s("type"))
     }
 
-    /** Administrative region (oblast / city / country) at a point, for matching alert status. */
+    /** Administrative region (oblast / raion / hromada / city) at a point, for matching alert status. */
     suspend fun regionOf(lat: Double, lon: Double): Region? = withContext(Dispatchers.IO) {
-        val url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=8&addressdetails=1" +
+        val url = "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&addressdetails=1" +
             "&accept-language=uk&lat=" + fmt(lat) + "&lon=" + fmt(lon)
         val text = get(url) ?: return@withContext null
         val o = runCatching { Http.json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return@withContext null
         val addr = o["address"] as? JsonObject ?: return@withContext null
         Region(
             state = addr.s("state") ?: addr.s("region"),
-            city = addr.s("city") ?: addr.s("town") ?: addr.s("municipality"),
+            county = addr.s("county") ?: addr.s("district"),
+            municipality = addr.s("municipality") ?: addr.s("city_district"),
+            city = addr.s("city") ?: addr.s("town") ?: addr.s("village"),
             country = addr.s("country_code") ?: addr.s("country"),
         )
     }

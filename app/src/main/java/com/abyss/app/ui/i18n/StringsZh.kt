@@ -439,4 +439,18 @@ object StringsZh : Strings() {
     override val shelterGeneral = "避难所"
     override val shelterOperator = "运营方"
     override val shelterCapacity = "容量"
+
+    // ---- radar: civil defence background + history
+    override val safetyWatching = "正在监测警报"
+    override val safetyStopWatch = "关闭"
+    override val safetyAllClear = "解除警报"
+    override val safetyNoAlert = "无警报"
+    override val safetyPossible = "可能有威胁"
+    override val safetyActive = "进行中的警报："
+    override val safetyBackground = "后台提醒"
+    override val safetyBackgroundHint = "应用关闭时也提醒我（震动+弹窗）"
+    override val safetyHistory = "警报历史"
+    override val safetyNoHistory = "暂无记录"
+    override val safetyOngoing = "现在"
+    override val safetyMinShort = "分钟"
 }

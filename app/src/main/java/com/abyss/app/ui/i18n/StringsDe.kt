@@ -439,4 +439,18 @@ object StringsDe : Strings() {
     override val shelterGeneral = "Schutzraum"
     override val shelterOperator = "Betreiber"
     override val shelterCapacity = "Kapazität"
+
+    // ---- radar: civil defence background + history
+    override val safetyWatching = "Alarme werden überwacht"
+    override val safetyStopWatch = "Ausschalten"
+    override val safetyAllClear = "Entwarnung"
+    override val safetyNoAlert = "Kein Alarm"
+    override val safetyPossible = "mögliche Gefahr"
+    override val safetyActive = "Aktive Alarme:"
+    override val safetyBackground = "Hintergrundwarnungen"
+    override val safetyBackgroundHint = "Auch bei geschlossener App warnen (Vibration + Pop-up)"
+    override val safetyHistory = "Alarmverlauf"
+    override val safetyNoHistory = "Noch keine Einträge"
+    override val safetyOngoing = "jetzt"
+    override val safetyMinShort = "Min."
 }

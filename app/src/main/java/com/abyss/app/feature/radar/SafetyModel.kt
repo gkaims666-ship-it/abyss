@@ -96,23 +96,53 @@ object AlertLogic {
     }
 
     /**
-     * The alert covering the user's region. Prefers a city-level match (e.g.
-     * Kyiv city), then the oblast, choosing the most serious if several apply.
+     * The alert covering the user's region, matched from the most specific
+     * administrative level down to the oblast: city / hromada → raion → oblast.
+     * A match at a finer level wins over a coarser one even if less severe,
+     * because it describes the user's place more precisely; ties within a level
+     * are broken by severity.
      */
-    fun matchRegion(state: String?, city: String?, country: String?, active: List<RegionAlert>): RegionAlert? {
+    fun matchRegion(
+        state: String?, county: String?, municipality: String?, city: String?,
+        country: String?, active: List<RegionAlert>,
+    ): RegionAlert? {
         if (!isUkraine(country)) return null
-        val ns = normalize(state)
-        val nc = normalize(city)
-        val matches = active.filter { a ->
-            val t = normalize(a.title)
-            (nc.isNotEmpty() && a.locationType == "city" && t == nc) ||
-                (ns.isNotEmpty() && t == ns) ||
-                (nc.isNotEmpty() && t == nc)
+        // Each tier: (candidate name, the location_types that represent it)
+        val tiers = listOf(
+            normalize(city) to setOf("city", "hromada"),
+            normalize(municipality) to setOf("hromada", "city"),
+            normalize(county) to setOf("raion"),
+            normalize(state) to setOf("oblast"),
+        )
+        for ((name, types) in tiers) {
+            if (name.isEmpty()) continue
+            val hit = active.filter { it.locationType in types && normalize(it.title) == name }
+                .minWithOrNull(::worseFirst)
+            if (hit != null) return hit
         }
-        return matches.minWithOrNull(::worseFirst)
+        // Fallback: any alert whose title matches the oblast name, any level.
+        val ns = normalize(state)
+        if (ns.isNotEmpty()) return active.filter { normalize(it.title) == ns }.minWithOrNull(::worseFirst)
+        return null
     }
 
     fun redCount(active: List<RegionAlert>) = active.count { it.level == AlertLevel.Red }
+}
+
+/** One past alert for the user's region, kept locally for the history view. */
+data class AlertEvent(val kindName: String, val level: String, val region: String, val startMs: Long, val endMs: Long)
+
+object AlertHistory {
+    /** Encode one event to a single prefs line (no separators clash: region last). */
+    fun encode(e: AlertEvent) = listOf(e.kindName, e.level, e.startMs.toString(), e.endMs.toString(), e.region).joinToString("\u001F")
+    fun decode(line: String): AlertEvent? {
+        val p = line.split("\u001F")
+        if (p.size < 5) return null
+        return AlertEvent(p[0], p[1], p.subList(4, p.size).joinToString("\u001F"),
+            p[2].toLongOrNull() ?: return null, p[3].toLongOrNull() ?: return null)
+    }
+    fun encodeAll(list: List<AlertEvent>) = list.takeLast(100).joinToString("\n") { encode(it) }
+    fun decodeAll(blob: String?) = blob?.lineSequence()?.mapNotNull { decode(it) }?.toList().orEmpty()
 }
 
 object ShelterLogic {
@@ -124,7 +154,10 @@ object ShelterLogic {
             "nwr[\"emergency\"=\"shelter\"]$bb;" +
             "nwr[\"bunker_type\"=\"bomb_shelter\"]$bb;" +
             "nwr[\"building\"=\"civil_defense\"]$bb;" +
-            "nwr[\"amenity\"=\"shelter\"][\"shelter_type\"=\"public_transport\"][\"covered\"=\"yes\"]$bb;" +
+            "nwr[\"railway\"=\"subway_entrance\"]$bb;" +
+            "nwr[\"station\"=\"subway\"]$bb;" +
+            "nwr[\"amenity\"=\"parking\"][\"location\"=\"underground\"]$bb;" +
+            "nwr[\"amenity\"=\"parking\"][\"parking\"=\"underground\"]$bb;" +
             ");out center tags;"
     }
 
@@ -135,8 +168,10 @@ object ShelterLogic {
         val amenity = tags["amenity"]?.lowercase()
         return when {
             st == "bomb_shelter" || bt == "bomb_shelter" || tags["building"]?.lowercase() == "civil_defense" -> ShelterKind.Bomb
-            railway == "station" && tags["station"]?.lowercase() == "subway" || tags["subway"] == "yes" -> ShelterKind.Metro
-            tags["location"]?.lowercase() == "underground" || amenity == "parking" && tags["parking"]?.lowercase() == "underground" -> ShelterKind.Underground
+            railway == "subway_entrance" || tags["station"]?.lowercase() == "subway" ||
+                (railway == "station" && tags["subway"]?.lowercase() == "yes") -> ShelterKind.Metro
+            amenity == "parking" &&
+                (tags["location"]?.lowercase() == "underground" || tags["parking"]?.lowercase() == "underground") -> ShelterKind.Underground
             amenity == "parking" -> ShelterKind.Parking
             else -> ShelterKind.General
         }

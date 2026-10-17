@@ -446,6 +446,21 @@ abstract class Strings {
     abstract val shelterOperator: String
     abstract val shelterCapacity: String
 
+    // ---- radar: civil defence background + history
+    abstract val safetyWatching: String
+    abstract val safetyStopWatch: String
+    abstract val safetyAllClear: String
+    abstract val safetyNoAlert: String
+    abstract val safetyPossible: String
+    abstract val safetyActive: String
+    abstract val safetyBackground: String
+    abstract val safetyBackgroundHint: String
+    abstract val safetyHistory: String
+    abstract val safetyNoHistory: String
+    abstract val safetyOngoing: String
+
+    abstract val safetyMinShort: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

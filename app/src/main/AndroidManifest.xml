@@ -82,6 +82,16 @@
             </intent-filter>
         </service>
 
+        <!-- Civil-defence air-raid alert watcher (region-level public alerts only) -->
+        <service
+            android:name=".feature.radar.AlertService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Public air-raid alert monitoring for civilian safety (region-level official alerts; vibration + notification when the user's area is under alert or cleared)" />
+        </service>
+
         <!-- Built-in VPN (Xray-core) -->
         <service
             android:name=".feature.vpn.AbyssVpnService"

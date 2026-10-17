@@ -439,4 +439,18 @@ object StringsTr : Strings() {
     override val shelterGeneral = "Sığınak"
     override val shelterOperator = "İşletmeci"
     override val shelterCapacity = "Kapasite"
+
+    // ---- radar: civil defence background + history
+    override val safetyWatching = "Uyarılar izleniyor"
+    override val safetyStopWatch = "Kapat"
+    override val safetyAllClear = "Tehlike geçti"
+    override val safetyNoAlert = "Uyarı yok"
+    override val safetyPossible = "olası tehdit"
+    override val safetyActive = "Etkin uyarılar:"
+    override val safetyBackground = "Arka plan uyarıları"
+    override val safetyBackgroundHint = "Uygulama kapalıyken bile uyar (titreşim + pencere)"
+    override val safetyHistory = "Uyarı geçmişi"
+    override val safetyNoHistory = "Henüz kayıt yok"
+    override val safetyOngoing = "şimdi"
+    override val safetyMinShort = "dk"
 }

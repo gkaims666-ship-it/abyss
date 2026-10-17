@@ -439,4 +439,18 @@ object StringsUk : Strings() {
     override val shelterGeneral = "Укриття"
     override val shelterOperator = "Оператор"
     override val shelterCapacity = "Місткість"
+
+    // ---- radar: civil defence background + history
+    override val safetyWatching = "Стежу за тривогами"
+    override val safetyStopWatch = "Вимкнути"
+    override val safetyAllClear = "Відбій тривоги"
+    override val safetyNoAlert = "Тривоги немає"
+    override val safetyPossible = "можлива загроза"
+    override val safetyActive = "Активних тривог:"
+    override val safetyBackground = "Фонові попередження"
+    override val safetyBackgroundHint = "Попереджати, навіть коли застосунок закрито (вібрація та вікно)"
+    override val safetyHistory = "Історія тривог"
+    override val safetyNoHistory = "Записів поки немає"
+    override val safetyOngoing = "зараз"
+    override val safetyMinShort = "хв"
 }
