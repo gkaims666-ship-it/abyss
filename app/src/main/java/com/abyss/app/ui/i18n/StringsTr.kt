@@ -351,4 +351,9 @@ object StringsTr : Strings() {
     override val radarResetNorth = "Kuzeye dön"
     override val radarLocating = "Konum bulunuyor…"
     override val radarWikiTitle = "Wikipedia’da yakında"
+
+    // ---- radar: events overlay
+    override val radarOverlayEvents = "Olaylar"
+    override val radarEventQuake = "Deprem"
+    override val radarEventNews = "Haber"
 }

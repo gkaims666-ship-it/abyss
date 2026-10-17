@@ -351,4 +351,9 @@ object StringsJa : Strings() {
     override val radarResetNorth = "北を上に"
     override val radarLocating = "現在地を取得中…"
     override val radarWikiTitle = "周辺のWikipedia"
+
+    // ---- radar: events overlay
+    override val radarOverlayEvents = "イベント"
+    override val radarEventQuake = "地震"
+    override val radarEventNews = "ニュース"
 }

@@ -3,6 +3,10 @@ package com.abyss.app.ui.feature.radar
 import android.Manifest
 import android.content.Intent
 import android.graphics.Color as AndroidColor
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.drawable.ShapeDrawable
+import android.graphics.drawable.shapes.OvalShape
 import android.net.Uri
 import android.content.Context
 import android.content.pm.PackageManager
@@ -49,6 +53,7 @@ import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.Place
@@ -91,6 +96,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.abyss.app.feature.radar.BaseLayer
 import com.abyss.app.feature.radar.GeoApi
+import com.abyss.app.feature.radar.MapEvent
 import com.abyss.app.feature.radar.Place
 import com.abyss.app.feature.radar.Plane
 import com.abyss.app.feature.radar.WikiPlace
@@ -129,6 +135,14 @@ import kotlin.math.roundToInt
 private enum class RadarFilter { All, Military, Emergency, Airborne }
 private enum class SearchMode { Planes, Places }
 
+/** Inverts map tiles for a dark-theme "night" basemap (no keyed dark service). */
+private val NIGHT_FILTER = ColorMatrixColorFilter(ColorMatrix(floatArrayOf(
+    -0.9f, 0f, 0f, 0f, 240f,
+    0f, -0.9f, 0f, 0f, 240f,
+    0f, 0f, -0.9f, 0f, 240f,
+    0f, 0f, 0f, 1f, 0f,
+)))
+
 /**
  * Map + live data for the radar. Lives exactly as long as the screen: leaving
  * the tool stops all network polling and frame work.
@@ -156,6 +170,8 @@ private class RadarController(private val app: Context, private val scope: Corou
     var layer by mutableStateOf(BaseLayer.Abyss)
     var weatherOn by mutableStateOf(false)
     var wikiOn by mutableStateOf(false)
+    var eventsOn by mutableStateOf(false)
+    var selectedEvent by mutableStateOf<MapEvent?>(null)
     var planesOn by mutableStateOf(true)
     var sheetOpen by mutableStateOf(false)
 
@@ -192,6 +208,8 @@ private class RadarController(private val app: Context, private val scope: Corou
     private var weatherTemplate: String? = null
     private var weatherFetchedAt = 0L
     private var wikiAt = 0L
+    private var eventsFolder: FolderOverlay? = null
+    private var eventsAt = 0L
 
     // ------------------------------------------------------------ map
 
@@ -215,6 +233,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         val events = MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(pt: GeoPoint): Boolean {
                 if (measuring) { addMeasurePoint(pt); return true }
+                if (selectedEvent != null) { selectedEvent = null; return true }
                 if (selected != null) { select(null); return true }
                 if (pin != null) { clearPin(); return true }
                 return false
@@ -226,6 +245,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         wikiFolder = FolderOverlay().also { mv.overlays.add(it) }
         measureFolder = FolderOverlay().also { mv.overlays.add(it) }
         pinFolder = FolderOverlay().also { mv.overlays.add(it) }
+        eventsFolder = FolderOverlay().also { mv.overlays.add(it) }
 
         val ov = PlaneOverlay(ctx.resources.displayMetrics.density)
         ov.onTap = { p -> select(p) }
@@ -345,6 +365,10 @@ private class RadarController(private val app: Context, private val scope: Corou
             wikiAt = System.currentTimeMillis()
             scope.launch { refreshWiki(currentLang) }
         }
+        if (eventsOn && System.currentTimeMillis() - eventsAt > 2000) {
+            eventsAt = System.currentTimeMillis()
+            scope.launch { refreshEvents(currentLang) }
+        }
     }
 
     /** UI language tag, set by the screen so background lookups match it. */
@@ -379,6 +403,7 @@ private class RadarController(private val app: Context, private val scope: Corou
     }
 
     fun select(p: Plane?) {
+        if (p != null) selectedEvent = null
         selected = p
         route = null
         if (p == null) following = false
@@ -431,6 +456,10 @@ private class RadarController(private val app: Context, private val scope: Corou
         val mv = map ?: return
         mv.setTileSource(layer.tileSource(dark ?: false))
         mv.maxZoomLevel = layer.maxZoom.toDouble()
+        // Dark theme + a light basemap → invert the tiles into a night map
+        // (key-free, and keeps OSM's deep zoom). Other layers keep true colour.
+        val night = (dark == true) && layer.invertsWhenDark
+        mv.overlayManager.tilesOverlay.setColorFilter(if (night) NIGHT_FILTER else null)
     }
 
     fun switchLayer(l: BaseLayer) {
@@ -497,6 +526,48 @@ private class RadarController(private val app: Context, private val scope: Corou
             folder.add(m)
         }
         mv.invalidate()
+    }
+
+    fun toggleEvents() {
+        eventsOn = !eventsOn
+        if (eventsOn) { eventsAt = 0L; dirty = true } else {
+            eventsFolder?.items?.clear(); selectedEvent = null; map?.invalidate()
+        }
+    }
+
+    private suspend fun refreshEvents(lang: String) {
+        val mv = map ?: return
+        val bb = mv.boundingBox
+        val list = runCatching {
+            GeoApi.events(bb.latNorth, bb.latSouth, bb.lonEast, bb.lonWest, lang)
+        }.getOrNull() ?: return
+        val folder = eventsFolder ?: return
+        folder.items.clear()
+        for (e in list) {
+            val m = Marker(mv)
+            m.position = GeoPoint(e.lat, e.lon)
+            m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            m.icon = dot(if (e.kind == MapEvent.Kind.Quake) 0xFFE5484D.toInt() else 0xFFF0A84C.toInt())
+            m.relatedObject = e
+            m.setOnMarkerClickListener { mk, _ ->
+                select(null); clearPin()
+                selectedEvent = mk.relatedObject as? MapEvent
+                mk.position?.let { map?.controller?.animateTo(it) }
+                true
+            }
+            folder.add(m)
+        }
+        mv.invalidate()
+    }
+
+    /** A small filled circle used as an event marker. */
+    private fun dot(color: Int): ShapeDrawable {
+        val px = (app.resources.displayMetrics.density * 13f).toInt()
+        return ShapeDrawable(OvalShape()).apply {
+            intrinsicWidth = px; intrinsicHeight = px
+            paint.color = color
+            paint.setShadowLayer(px * 0.25f, 0f, 0f, 0x80000000.toInt())
+        }
     }
 
     fun openUrl(url: String?) {
@@ -685,12 +756,13 @@ fun RadarScreen(palette: AbyssPalette) {
         }
     }
 
-    BackHandler(enabled = active && (ctl.selected != null || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
+    BackHandler(enabled = active && (ctl.selected != null || ctl.selectedEvent != null || ctl.results != null || ctl.placeResults != null || ctl.pin != null || ctl.sheetOpen || ctl.measuring)) {
         when {
             ctl.sheetOpen -> ctl.sheetOpen = false
             ctl.results != null -> ctl.results = null
             ctl.placeResults != null -> ctl.placeResults = null
             ctl.measuring -> ctl.toggleMeasure()
+            ctl.selectedEvent != null -> ctl.selectedEvent = null
             ctl.pin != null -> ctl.clearPin()
             else -> ctl.select(null)
         }
@@ -799,7 +871,11 @@ fun RadarScreen(palette: AbyssPalette) {
                     onFollow = { ctl.following = !ctl.following },
                     onClose = { ctl.select(null) })
             }
-            val showPin = ctl.pin != null && ctl.selected == null
+            val ev = ctl.selectedEvent
+            AnimatedVisibility(ev != null && ctl.selected == null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
+                if (ev != null) EventCard(ev, palette, S, onOpen = { ctl.openUrl(ev.url) }, onClose = { ctl.selectedEvent = null })
+            }
+            val showPin = ctl.pin != null && ctl.selected == null && ctl.selectedEvent == null
             AnimatedVisibility(showPin, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
                 ctl.pin?.let { pt ->
                     PinCard(pt, ctl.pinPlace, ctl.pinLoading, ctl.me, ctl.metric, palette, S,
@@ -827,7 +903,7 @@ fun RadarScreen(palette: AbyssPalette) {
         }
 
         // Long-press hint, shown briefly when the map is idle and empty-handed.
-        if (!ctl.sheetOpen && ctl.selected == null && ctl.pin == null && !ctl.measuring) {
+        if (!ctl.sheetOpen && ctl.selected == null && ctl.pin == null && ctl.selectedEvent == null && !ctl.measuring) {
             Text(S.radarDropPinHint, color = palette.onSurface.copy(alpha = 0.4f), fontSize = 10.5.sp,
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 108.dp))
         }
@@ -862,6 +938,7 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) 
             ctl.planesOn = !ctl.planesOn; ctl.overlay?.isEnabled = ctl.planesOn; ctl.map?.invalidate()
         }
         ToggleRow(Icons.Filled.MenuBook, S.radarOverlayWiki, ctl.wikiOn, palette) { ctl.toggleWiki() }
+        ToggleRow(Icons.Filled.Bolt, S.radarOverlayEvents, ctl.eventsOn, palette) { ctl.toggleEvents() }
         ToggleRow(Icons.Filled.Umbrella, S.radarOverlayWeather, ctl.weatherOn, palette) { ctl.toggleWeather() }
         Spacer(Modifier.height(6.dp))
     }
@@ -1249,3 +1326,43 @@ private fun vspeed(fpm: Int?, metric: Boolean, S: Strings): String {
 private fun dist(nm: Double, metric: Boolean, S: Strings): String =
     if (metric) "%,d %s".format(S.locale, (nm * 1.852).roundToInt(), S.unitKm)
     else "%,d %s".format(S.locale, nm.roundToInt(), S.unitNm)
+
+@Composable
+private fun EventCard(e: MapEvent, palette: AbyssPalette, S: Strings, onOpen: () -> Unit, onClose: () -> Unit) {
+    val quake = e.kind == MapEvent.Kind.Quake
+    val tagColor = if (quake) palette.error else Color(0xFFF0A84C)
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
+            .border(1.dp, palette.outline, RoundedCornerShape(22.dp)).padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Bolt, null, tint = tagColor, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+            Tag(if (quake) S.radarEventQuake else S.radarEventNews, tagColor, palette)
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.size(32.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(18.dp))
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(e.title, color = palette.onBackground, fontSize = 17.sp, fontWeight = FontWeight.Medium,
+            maxLines = 3, overflow = TextOverflow.Ellipsis)
+        if (!e.description.isNullOrBlank() && e.description != e.title) {
+            Spacer(Modifier.height(4.dp))
+            Text(e.description, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 13.sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (e.url != null) {
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(palette.primary)
+                    .clickable(onClick = onOpen).padding(vertical = 11.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.MenuBook, null, tint = palette.onPrimary, modifier = Modifier.size(17.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(S.radarOpenArticle, color = palette.onPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}

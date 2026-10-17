@@ -351,4 +351,9 @@ object StringsZh : Strings() {
     override val radarResetNorth = "朝向正北"
     override val radarLocating = "定位中…"
     override val radarWikiTitle = "维基百科附近条目"
+
+    // ---- radar: events overlay
+    override val radarOverlayEvents = "事件"
+    override val radarEventQuake = "地震"
+    override val radarEventNews = "新闻"
 }

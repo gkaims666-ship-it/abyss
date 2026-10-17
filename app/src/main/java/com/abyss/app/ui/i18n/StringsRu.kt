@@ -351,4 +351,9 @@ object StringsRu : Strings() {
     override val radarResetNorth = "На север"
     override val radarLocating = "Определяю…"
     override val radarWikiTitle = "Рядом в Wikipedia"
+
+    // ---- radar: events overlay
+    override val radarOverlayEvents = "События"
+    override val radarEventQuake = "Землетрясение"
+    override val radarEventNews = "Новость"
 }

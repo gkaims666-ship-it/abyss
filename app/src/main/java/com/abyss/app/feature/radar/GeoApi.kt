@@ -10,6 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
 import okhttp3.Request
 import java.util.Locale
 
@@ -32,6 +33,19 @@ data class Place(
 )
 
 data class WikiPlace(val title: String, val lat: Double, val lon: Double, val distM: Int, val lang: String)
+
+/** A real-world event pinned to the map (an earthquake, a reported news event…). */
+data class MapEvent(
+    val kind: Kind,
+    val title: String,
+    val description: String?,
+    val url: String?,
+    val lat: Double,
+    val lon: Double,
+    val timeMs: Long,
+) {
+    enum class Kind { Quake, News }
+}
 
 object GeoApi {
     private const val UA = "Abyss/1.0 (Android; com.abyss.app; contact: abyss-app@users.noreply.github.com)"
@@ -106,6 +120,69 @@ object GeoApi {
         host + latest + "/256/{z}/{x}/{y}/4/1_1.png"
     }
 
+    /**
+     * Recent real-world events inside the given bounds: earthquakes (USGS, past
+     * day) and geolocated news (GDELT). Public data; best-effort — either source
+     * can be empty without failing the other.
+     */
+    suspend fun events(north: Double, south: Double, east: Double, west: Double, lang: String): List<MapEvent> =
+        withContext(Dispatchers.IO) {
+            val out = ArrayList<MapEvent>()
+            fun inBounds(la: Double, lo: Double) = la in south..north &&
+                (if (west <= east) lo in west..east else (lo >= west || lo <= east))
+            // USGS earthquakes (M2.5+, last 24 h).
+            runCatching {
+                val text = get("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson")
+                if (text != null) {
+                    val feats = (Http.json.parseToJsonElement(text).jsonObject["features"] as? JsonArray).orEmpty()
+                    for (f in feats) {
+                        val o = f as? JsonObject ?: continue
+                        val g = (o["geometry"] as? JsonObject)?.get("coordinates") as? JsonArray ?: continue
+                        val lon = (g.getOrNull(0) as? JsonPrimitive)?.doubleOrNull ?: continue
+                        val la = (g.getOrNull(1) as? JsonPrimitive)?.doubleOrNull ?: continue
+                        if (!inBounds(la, lon)) continue
+                        val pr = o["properties"] as? JsonObject ?: continue
+                        out += MapEvent(
+                            MapEvent.Kind.Quake,
+                            pr.s("title") ?: ("M " + (pr.d("mag") ?: 0.0)),
+                            pr.s("place"),
+                            pr.s("url"),
+                            la, lon, pr.l("time") ?: 0L,
+                        )
+                    }
+                }
+            }
+            // GDELT geolocated news (last 24 h) for notable event types.
+            runCatching {
+                val q = enc("(earthquake OR explosion OR wildfire OR flood OR protest OR crash OR eruption OR storm OR outbreak)")
+                val text = get("https://api.gdeltproject.org/api/v2/geo/geo?format=GeoJSON&mode=PointData&timespan=24H&query=$q")
+                if (text != null) {
+                    val feats = (Http.json.parseToJsonElement(text).jsonObject["features"] as? JsonArray).orEmpty()
+                    for (f in feats) {
+                        if (out.size > 200) break
+                        val o = f as? JsonObject ?: continue
+                        val g = (o["geometry"] as? JsonObject)?.get("coordinates") as? JsonArray ?: continue
+                        val lon = (g.getOrNull(0) as? JsonPrimitive)?.doubleOrNull ?: continue
+                        val la = (g.getOrNull(1) as? JsonPrimitive)?.doubleOrNull ?: continue
+                        if (!inBounds(la, lon)) continue
+                        val pr = o["properties"] as? JsonObject ?: continue
+                        val html = pr.s("html")
+                        val url = html?.let { Regex("href=\"([^\"]+)\"").find(it)?.groupValues?.get(1) }
+                        val linkText = html?.let { Regex(">([^<]{4,})</a>").find(it)?.groupValues?.get(1) }
+                        out += MapEvent(
+                            MapEvent.Kind.News,
+                            (linkText ?: pr.s("name") ?: "News").trim(),
+                            pr.s("name"),
+                            url,
+                            la, lon, 0L,
+                        )
+                    }
+                }
+            }
+            // Nearest first when a center is implied by the bounds.
+            out.distinctBy { it.url ?: (it.title + it.lat) }.take(140)
+        }
+
     private fun get(url: String): String? = runCatching {
         client.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
             if (r.isSuccessful) r.body?.string() else null
@@ -123,4 +200,5 @@ object GeoApi {
     private fun JsonObject.s(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject.d(k: String) = (this[k] as? JsonPrimitive)?.doubleOrNull
     private fun JsonObject.i(k: String) = (this[k] as? JsonPrimitive)?.let { it.intOrNull ?: it.doubleOrNull?.toInt() }
+    private fun JsonObject.l(k: String) = (this[k] as? JsonPrimitive)?.let { it.longOrNull ?: it.doubleOrNull?.toLong() }
 }
