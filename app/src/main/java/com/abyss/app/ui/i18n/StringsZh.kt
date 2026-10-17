@@ -484,4 +484,8 @@ object StringsZh : Strings() {
     override val radarPolarDay = "极昼"
     override val radarPolarNight = "极夜"
     override val radarOpenIn = "在以下打开…"
+
+    // ---- power saving
+    override val powerSave = "省电模式"
+    override val powerSaveSub = "冻结动态背景 — 仅保留按钮和页面切换"
 }

@@ -11,7 +11,17 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.spring
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.layout.offset
+import com.abyss.app.ui.components.AbyssMark
+import kotlin.math.PI
+import kotlin.math.roundToInt
+import kotlin.math.sin
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.key
 import androidx.compose.ui.draw.drawWithContent
@@ -34,6 +44,7 @@ import com.abyss.app.ui.i18n.LocalStrings
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.abyss.app.ui.background.AbyssAnimatedBackground
+import com.abyss.app.ui.background.AbyssBackgroundState
 import com.abyss.app.ui.background.AbyssWaveOverlay
 import com.abyss.app.ui.background.LocalAbyssField
 import com.abyss.app.ui.background.abyssTouchWaves
@@ -169,11 +180,54 @@ private fun AbyssRoot() {
     var visited by remember { mutableStateOf(setOf(Tab.Chat)) }
     LaunchedEffect(tab) { visited = visited + tab }
 
+    // Power-saving mode: store → background state (the Settings toggle takes this
+    // instant path). The black-hole tap sets it mid-animation and persists it.
+    LaunchedEffect(settings.powerSave) { bg.powerSave = settings.powerSave }
+
+    // The black-hole collapse / expand animation. Tapping the mark runs it: the
+    // hole swells ~4×, the living field is sucked in (or spat back out), then the
+    // hole returns to rest. At the midpoint the power-saving mode flips.
+    val holeAnim = remember { Animatable(0f) }
+    LaunchedEffect(bg.holeToggleReq) {
+        if (bg.holeToggleReq == 0) return@LaunchedEffect
+        val toSave = !bg.powerSave
+        bg.holeExpand = !toSave
+        bg.holeActive = true
+        holeAnim.snapTo(0f)
+        holeAnim.animateTo(0.5f, tween(460, easing = FastOutSlowInEasing)) { bg.holePhase = value }
+        bg.powerSave = toSave
+        vm.setPowerSave(toSave)
+        holeAnim.animateTo(1f, tween(540, easing = FastOutSlowInEasing)) { bg.holePhase = value }
+        bg.holePhase = 0f
+        bg.holeActive = false
+    }
+
     CompositionLocalProvider(LocalStrings provides strings, LocalAbyssField provides bg) {
     AbyssTheme(palette = palette) {
-        Box(Modifier.fillMaxSize().abyssTouchWaves(bg)) {
-            // One living background + waves for the whole app, every tab.
-            AbyssAnimatedBackground(palette = palette, state = bg, dim = dim)
+        Box(Modifier.fillMaxSize().then(if (bg.powerSave && !bg.holeActive) Modifier else Modifier.abyssTouchWaves(bg))) {
+            // One living background + waves for the whole app, every tab. In
+            // power-saving mode it is not composed at all (no sim, no glyphs),
+            // except while the collapse/expand animation is playing.
+            if (!bg.powerSave || bg.holeActive) {
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    if (bg.holeActive) {
+                        val p = bg.holePhase
+                        val k = if (bg.holeExpand) ((p - 0.5f) / 0.5f).coerceIn(0f, 1f)
+                                else (1f - (p / 0.5f).coerceIn(0f, 1f))
+                        alpha = k
+                        val sc = 0.14f + 0.86f * k
+                        scaleX = sc; scaleY = sc
+                        rotationZ = (1f - k) * (if (bg.holeExpand) 26f else -26f)
+                        val c = bg.holeCenter
+                        if (c != Offset.Unspecified && size.width > 0f && size.height > 0f) {
+                            transformOrigin = TransformOrigin(
+                                (c.x / size.width).coerceIn(0f, 1f), (c.y / size.height).coerceIn(0f, 1f))
+                        }
+                    }
+                }) {
+                    AbyssAnimatedBackground(palette = palette, state = bg, dim = dim)
+                }
+            }
 
             Scaffold(
                 containerColor = Color.Transparent,
@@ -207,8 +261,31 @@ private fun AbyssRoot() {
                 }
             }
 
-            // Rings above everything (touch-transparent) — visible over any content.
-            AbyssWaveOverlay(palette = palette, state = bg)
+            // Rings/crests above content (touch-transparent). Gated and sucked
+            // in with the same transform as the background during the animation.
+            if (!bg.powerSave || bg.holeActive) {
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    if (bg.holeActive) {
+                        val p = bg.holePhase
+                        val k = if (bg.holeExpand) ((p - 0.5f) / 0.5f).coerceIn(0f, 1f)
+                                else (1f - (p / 0.5f).coerceIn(0f, 1f))
+                        alpha = k
+                        val sc = 0.14f + 0.86f * k
+                        scaleX = sc; scaleY = sc
+                        val c = bg.holeCenter
+                        if (c != Offset.Unspecified && size.width > 0f && size.height > 0f) {
+                            transformOrigin = TransformOrigin(
+                                (c.x / size.width).coerceIn(0f, 1f), (c.y / size.height).coerceIn(0f, 1f))
+                        }
+                    }
+                }) {
+                    AbyssWaveOverlay(palette = palette, state = bg)
+                }
+            }
+
+            // The black hole itself: swells over everything while the field is
+            // sucked in / spat out, then returns to rest.
+            BlackHoleOverlay(state = bg, palette = palette)
 
             if (showIntro) {
                 AbyssIntro(
@@ -223,6 +300,34 @@ private fun AbyssRoot() {
             }
         }
     }
+    }
+}
+
+/**
+ * The black hole that drives power-saving. While the animation plays it swells
+ * (~4×) over a soft scrim and spins, anchored at the chat mark's position, then
+ * shrinks back to rest. The living field is sucked in / spat out behind it.
+ */
+@Composable
+private fun BlackHoleOverlay(state: AbyssBackgroundState, palette: AbyssPalette) {
+    if (!state.holeActive) return
+    val p = state.holePhase
+    val swell = sin(p * PI).toFloat()        // 0 → 1 → 0 across the play
+    val hs = 1f + 3f * swell                  // rest 1× → peak 4× → rest 1×
+    val markSize = 128.dp
+    val halfPx = with(LocalDensity.current) { markSize.toPx() } / 2f
+    val c = state.holeCenter
+    Box(Modifier.fillMaxSize().background(palette.background.copy(alpha = 0.5f * swell))) {
+        val place = if (c != Offset.Unspecified)
+            Modifier.offset { IntOffset((c.x - halfPx).roundToInt(), (c.y - halfPx).roundToInt()) }
+        else Modifier.align(Alignment.Center)
+        AbyssMark(
+            palette, size = markSize, speedMs = 900, pulse = true, detailed = true,
+            modifier = place.graphicsLayer {
+                scaleX = hs; scaleY = hs
+                rotationZ = (if (state.holeExpand) -1f else 1f) * 120f * p
+            },
+        )
     }
 }
 

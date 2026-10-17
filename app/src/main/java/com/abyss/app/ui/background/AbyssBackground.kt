@@ -21,6 +21,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -220,6 +223,23 @@ class AbyssBackgroundState {
         val held = now - chargeStart - CHARGE_DELAY_NS
         return (held.toFloat() / (CHARGE_FULL_NS - CHARGE_DELAY_NS)).coerceIn(0f, 1f)
     }
+
+    // ---- power-saving mode + the black-hole collapse/expand animation
+    /** When true the living background (water, waves, glyphs) is off; buttons and page transitions stay. */
+    var powerSave by mutableStateOf(false)
+    /** Screen position of the chat's black-hole mark, the centre of the animation. */
+    var holeCenter by mutableStateOf(Offset.Unspecified)
+    /** 0 = normal … peaks at 1 when the hole is fully expanded and the field is gone. */
+    var holePhase by mutableFloatStateOf(0f)
+    /** True while the collapse/expand animation plays (keeps the field composed to animate it). */
+    var holeActive by mutableStateOf(false)
+    /** True when the current play is a restore (white hole: spit everything back out). */
+    var holeExpand by mutableStateOf(false)
+    var holeToggleReq by mutableIntStateOf(0)
+        private set
+
+    /** Request the animated black-hole toggle (tap on the mark). */
+    fun requestHoleToggle() { holeToggleReq++ }
 
     internal fun beginCharge(at: Offset) { charging = true; chargeStart = System.nanoTime(); chargePos = at }
     internal fun cancelCharge() { charging = false }
@@ -937,8 +957,20 @@ float dec(float s) {
     return e / max(1.0 - abs(e), 0.02);
 }
 
+// Smooth-bilinear: warp the sample so the hardware's linear filter reconstructs
+// the coarse height grid with a C1 (quintic) ramp instead of hard per-cell
+// facets. Kills the "pixelation" when many wavefronts crowd the grid, at no
+// simulation cost.
+float2 sm(float2 c) {
+    float2 t = c - 0.5;
+    float2 b = floor(t);
+    float2 f = t - b;
+    f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    return b + 0.5 + f;
+}
+
 float energyAt(float2 c) {
-    float4 f = float4(uField.eval(c));
+    float4 f = float4(uField.eval(sm(c)));
     float h = dec(f.r);
     float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
     return clamp(abs(h) * 2.4 + length(g) * 3.4, 0.0, 1.0);
@@ -947,7 +979,7 @@ float energyAt(float2 c) {
 half4 main(float2 p) {
     // Grid cell (x,y) covers [(x-1)*cell, x*cell): +1 cell offset, sample at centre.
     float2 c = p / uCell + float2(1.0, 1.0);
-    float4 f = float4(uField.eval(c));
+    float4 f = float4(uField.eval(sm(c)));
     float h = dec(f.r);
     float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
     float slope = length(g);
@@ -1054,9 +1086,17 @@ float dec(float s) {
     return e / max(1.0 - abs(e), 0.02);
 }
 
+float2 sm(float2 c) {
+    float2 t = c - 0.5;
+    float2 b = floor(t);
+    float2 f = t - b;
+    f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    return b + 0.5 + f;
+}
+
 half4 main(float2 p) {
     float2 c = p / uCell + float2(1.0, 1.0);
-    float4 f = float4(uField.eval(c));
+    float4 f = float4(uField.eval(sm(c)));
     float h = dec(f.r);
     float2 g = float2(dec(f.g), dec(f.b)) * 0.5;
     float slope = length(g);

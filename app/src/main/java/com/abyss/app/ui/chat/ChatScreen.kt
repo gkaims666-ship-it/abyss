@@ -107,6 +107,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -160,6 +162,9 @@ fun ChatScreen(
 
     ModalNavigationDrawer(
         drawerState = drawer,
+        // Open only from the menu button (no left→right swipe-to-open); swipe
+        // still closes it while it is open.
+        gesturesEnabled = drawer.isOpen,
         drawerContent = {
             ConversationDrawer(
                 palette = palette,
@@ -337,8 +342,15 @@ private fun Hero(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        val field = com.abyss.app.ui.background.LocalAbyssField.current
         Row(Modifier.abyssObstacle(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            AbyssMark(palette, size = 36.dp)
+            // Tap the black hole to enter / leave power-saving mode (with the
+            // collapse / expand animation). It also reports its position so the
+            // animation is anchored here.
+            AbyssMark(palette, size = 36.dp, modifier = Modifier
+                .onGloballyPositioned { field?.holeCenter = it.boundsInRoot().center }
+                .clip(CircleShape)
+                .clickable { field?.requestHoleToggle() })
             Spacer(Modifier.width(12.dp))
             Text(
                 text.take(shown),

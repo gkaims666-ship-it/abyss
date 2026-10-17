@@ -139,6 +139,7 @@ class ChatViewModel : ViewModel() {
     fun setModel(model: String) = viewModelScope.launch { settingsStore.setModel(model) }
     fun toggleHarvest(on: Boolean) = viewModelScope.launch { settingsStore.setHarvest(on) }
     fun setLanguage(code: String) = viewModelScope.launch { settingsStore.setLanguage(code) }
+    fun setPowerSave(on: Boolean) = viewModelScope.launch { settingsStore.setPowerSave(on) }
 
     fun stop() {
         streamJob?.cancel()

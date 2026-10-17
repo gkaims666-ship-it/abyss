@@ -496,6 +496,10 @@ abstract class Strings {
 
     abstract val radarOpenIn: String
 
+    // ---- power saving
+    abstract val powerSave: String
+    abstract val powerSaveSub: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

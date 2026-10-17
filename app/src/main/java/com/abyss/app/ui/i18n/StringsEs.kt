@@ -484,4 +484,8 @@ object StringsEs : Strings() {
     override val radarPolarDay = "Día polar"
     override val radarPolarNight = "Noche polar"
     override val radarOpenIn = "Abrir en…"
+
+    // ---- power saving
+    override val powerSave = "Ahorro de energía"
+    override val powerSaveSub = "Congelar el fondo vivo — dejar solo botones y transiciones de página"
 }

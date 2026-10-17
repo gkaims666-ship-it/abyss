@@ -37,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Key
@@ -181,6 +182,9 @@ fun SettingsScreen(
                                 }
                             }
                         }
+                        Divider(palette)
+                        SwitchRow(Icons.Filled.BatterySaver, S.powerSave, S.powerSaveSub,
+                            s.powerSave, palette) { vm.setPowerSave(it) }
                     }
                 }
             }

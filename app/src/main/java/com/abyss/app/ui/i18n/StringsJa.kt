@@ -484,4 +484,8 @@ object StringsJa : Strings() {
     override val radarPolarDay = "白夜"
     override val radarPolarNight = "極夜"
     override val radarOpenIn = "次で開く…"
+
+    // ---- power saving
+    override val powerSave = "省電力"
+    override val powerSaveSub = "動く背景を止める — ボタンとページ遷移のみ残す"
 }

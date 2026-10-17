@@ -39,6 +39,7 @@ data class AbyssSettings(
     // Personalisation
     val userName: String = "",
     val language: String = "system",          // "system" or a UI language code
+    val powerSave: Boolean = false,           // off: full living background; on: static, buttons+transitions only
 )
 
 class SettingsStore(private val context: Context) {
@@ -64,6 +65,7 @@ class SettingsStore(private val context: Context) {
         val systemPrompt = stringPreferencesKey("system_prompt")
         val userName = stringPreferencesKey("user_name")
         val language = stringPreferencesKey("language")
+        val powerSave = booleanPreferencesKey("power_save")
     }
 
     val settings: Flow<AbyssSettings> = context.dataStore.data.map { p ->
@@ -88,6 +90,7 @@ class SettingsStore(private val context: Context) {
             systemPrompt = p[Keys.systemPrompt] ?: "",
             userName = p[Keys.userName] ?: "",
             language = p[Keys.language] ?: "system",
+            powerSave = p[Keys.powerSave] ?: false,
         )
     }
 
@@ -112,6 +115,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setSystemPrompt(s: String) = context.dataStore.edit { it[Keys.systemPrompt] = s }
     suspend fun setUserName(n: String) = context.dataStore.edit { it[Keys.userName] = n.trim() }
     suspend fun setLanguage(code: String) = context.dataStore.edit { it[Keys.language] = code }
+    suspend fun setPowerSave(on: Boolean) = context.dataStore.edit { it[Keys.powerSave] = on }
     suspend fun toggleMutedLang(code: String) = context.dataStore.edit { p ->
         val cur = p[Keys.mutedLangs] ?: emptySet()
         p[Keys.mutedLangs] = if (code in cur) cur - code else cur + code

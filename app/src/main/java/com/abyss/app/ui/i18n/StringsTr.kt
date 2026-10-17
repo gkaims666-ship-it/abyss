@@ -484,4 +484,8 @@ object StringsTr : Strings() {
     override val radarPolarDay = "Kutup gündüzü"
     override val radarPolarNight = "Kutup gecesi"
     override val radarOpenIn = "Şurada aç…"
+
+    // ---- power saving
+    override val powerSave = "Güç tasarrufu"
+    override val powerSaveSub = "Canlı arka planı dondur — yalnızca düğmeler ve sayfa geçişleri kalır"
 }
