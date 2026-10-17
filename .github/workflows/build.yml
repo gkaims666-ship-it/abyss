@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write   # lets the job publish the APK to Releases
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -42,3 +45,25 @@ jobs:
           name: abyss-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # Every build on main also lands in Releases as a plain APK (no zip, no login):
+      # https://github.com/<owner>/<repo>/releases/latest/download/Abyss.apk
+      - name: Publish APK to Releases
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -n 1)
+          cp "$APK" Abyss.apk
+          {
+            echo "Сборка №${{ github.run_number }} · коммит ${GITHUB_SHA::7}"
+            echo
+            git log -1 --pretty=%B
+          } > notes.md
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest Abyss.apk \
+            --target "$GITHUB_SHA" \
+            --title "Abyss · сборка ${{ github.run_number }}" \
+            --notes-file notes.md \
+            --latest
