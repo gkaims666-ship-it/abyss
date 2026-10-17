@@ -37,7 +37,19 @@ jobs:
           echo "$PWD/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+
+      # Surface compiler errors as annotations (readable without downloading logs).
+      - name: Report build errors
+        if: failure()
+        shell: bash
+        run: |
+          grep -E "^e: |error:|What went wrong|Could not resolve|> " build.log | grep -v "^> Task" | head -n 40 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

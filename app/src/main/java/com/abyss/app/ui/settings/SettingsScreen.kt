@@ -58,6 +58,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -103,8 +105,10 @@ fun SettingsScreen(
     palette: AbyssPalette,
     onOpenPermissions: () -> Unit,
 ) {
-    val state by vm.state.collectAsState()
-    val s = state.settings
+    // Settings only — not the chat: this screen stays alive in the background and
+    // must not re-render for every streamed token.
+    val s by remember(vm) { vm.state.map { it.settings }.distinctUntilChanged() }
+        .collectAsState(vm.state.value.settings)
     val keyStore = ServiceLocator.keyStore
     val store = ServiceLocator.settings
     val scope = rememberCoroutineScope()
@@ -125,7 +129,7 @@ fun SettingsScreen(
     var langMenu by remember { mutableStateOf(false) }
     var uiLangMenu by remember { mutableStateOf(false) }
     val S = LocalStrings.current
-    BackHandler(enabled = showThemes) { showThemes = false }
+    BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (showThemes)) { showThemes = false }
 
     val version = remember {
         runCatching {

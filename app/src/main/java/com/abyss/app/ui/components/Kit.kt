@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -122,3 +123,9 @@ fun AnimatedVisibilityScope.fadeLayer(enterMs: Int = 300, exitMs: Int = 180): Mo
         compositingStrategy = CompositingStrategy.ModulateAlpha
     }
 }
+
+/**
+ * False inside a tab that is kept alive but not on screen: back handlers,
+ * water obstacles and other side effects switch off while it is hidden.
+ */
+val LocalTabActive = compositionLocalOf { true }

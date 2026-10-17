@@ -12,6 +12,9 @@
     <!-- Media capture (Stage 2) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Sky radar: centre the map on you (optional) -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <!-- Alarms -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />

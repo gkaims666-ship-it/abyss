@@ -38,7 +38,7 @@ private enum class SettingsRoute { Main, Permissions }
 @Composable
 fun SettingsHost(vm: ChatViewModel, palette: AbyssPalette) {
     var route by remember { mutableStateOf(SettingsRoute.Main) }
-    androidx.activity.compose.BackHandler(enabled = route != SettingsRoute.Main) { route = SettingsRoute.Main }
+    androidx.activity.compose.BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (route != SettingsRoute.Main)) { route = SettingsRoute.Main }
 
     AnimatedContent(
         targetState = route,

@@ -154,9 +154,9 @@ fun ChatScreen(
     val strings = LocalStrings.current
 
     // System back closes overlays first instead of leaving the app.
-    BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
-    BackHandler(enabled = showPalettes) { showPalettes = false }
-    BackHandler(enabled = showCamera) { showCamera = false }
+    BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (drawer.isOpen)) { scope.launch { drawer.close() } }
+    BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (showPalettes)) { showPalettes = false }
+    BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (showCamera)) { showCamera = false }
 
     ModalNavigationDrawer(
         drawerState = drawer,

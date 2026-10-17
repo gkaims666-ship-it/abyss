@@ -68,7 +68,7 @@ fun AlarmsScreen(palette: AbyssPalette) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var editing by remember { mutableStateOf<AlarmEntity?>(null) }
-    androidx.activity.compose.BackHandler(enabled = editing != null) { editing = null }
+    androidx.activity.compose.BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (editing != null)) { editing = null }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().padding(16.dp)) {

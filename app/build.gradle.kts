@@ -113,6 +113,9 @@ dependencies {
     implementation("androidx.camera:camera-video:1.4.1")
     implementation("androidx.camera:camera-view:1.4.1")
 
+    // Sky radar map (OpenStreetMap tiles; no API key)
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+
     // Optional prebuilt native engines (e.g. a gomobile-built Xray .aar for the
     // VPN). Empty by default, so the standard APK is unaffected.
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))

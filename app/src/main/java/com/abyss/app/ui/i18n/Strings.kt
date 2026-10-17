@@ -279,6 +279,55 @@ abstract class Strings {
     abstract val errNoAnalysis: String
     abstract fun unsupportedLanguage(language: String): String
 
+    // ---- sky radar
+    abstract val toolRadar: String
+    abstract val toolRadarBlurb: String
+    abstract val radarSearchHint: String
+    abstract val radarFilterAll: String
+    abstract val radarFilterMilitary: String
+    abstract val radarFilterEmergency: String
+    abstract val radarFilterAirborne: String
+    abstract fun radarCount(n: Int): String
+    abstract fun radarUpdatedAgo(sec: Int): String
+    abstract val radarLoading: String
+    abstract val radarOffline: String
+    abstract val radarZoomIn: String
+    abstract val radarNoResults: String
+    abstract val radarSearching: String
+    abstract val radarAltitude: String
+    abstract val radarSpeed: String
+    abstract val radarVSpeed: String
+    abstract val radarHeading: String
+    abstract val radarSquawk: String
+    abstract val radarType: String
+    abstract val radarReg: String
+    abstract val radarHex: String
+    abstract val radarSeen: String
+    abstract val radarRouteUnknown: String
+    abstract val radarFollow: String
+    abstract val radarFollowing: String
+    abstract val radarOnGround: String
+    abstract val radarMyLocation: String
+    abstract val radarLocationDenied: String
+    abstract val radarUnitsMetric: String
+    abstract val radarUnitsImperial: String
+    abstract val radarSq7500: String
+    abstract val radarSq7600: String
+    abstract val radarSq7700: String
+    abstract val radarEmergencyGeneric: String
+    abstract fun radarProgress(flown: String, left: String): String
+    abstract val radarCredit: String
+    abstract val radarMilitaryTag: String
+    abstract val unitM: String
+    abstract val unitFt: String
+    abstract val unitKmh: String
+    abstract val unitKt: String
+    abstract val unitMs: String
+    abstract val unitFpm: String
+    abstract val unitKm: String
+    abstract val unitNm: String
+    abstract val unitSec: String
+
     /** Localised label for a captured media kind ("photo" | "video" | "circle"). */
     fun mediaKind(kind: String): String = when (kind) {
         "photo" -> camPhoto

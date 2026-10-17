@@ -80,7 +80,7 @@ fun NotesScreen(palette: AbyssPalette) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<NoteEntity?>(null) }
-    androidx.activity.compose.BackHandler(enabled = editing != null) { editing = null }
+    androidx.activity.compose.BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (editing != null)) { editing = null }
 
     val filtered = notes.filter {
         query.isBlank() || it.title.contains(query, true) || it.body.contains(query, true)

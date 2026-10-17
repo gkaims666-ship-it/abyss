@@ -248,12 +248,23 @@ fun Modifier.abyssObstacle(corner: Dp = 0.dp): Modifier = composed {
     if (st == null) Modifier else {
         val key = remember { Any() }
         val rad = with(LocalDensity.current) { corner.toPx() }
-        DisposableEffect(st, key) { onDispose { st.removeObstacle(key) } }
+        // Elements of a hidden (kept-alive) tab leave the water; they come back
+        // at their last position the moment the tab is shown again.
+        val active = com.abyss.app.ui.components.LocalTabActive.current
+        val last = remember { FloatArray(4) }
+        val known = remember { BooleanArray(1) }
+        DisposableEffect(st, key, active) {
+            if (active && known[0]) st.putObstacle(key, last[0], last[1], last[2], last[3], rad)
+            else st.removeObstacle(key)
+            onDispose { st.removeObstacle(key) }
+        }
         Modifier.onGloballyPositioned { c ->
             if (!c.isAttached) { st.removeObstacle(key); return@onGloballyPositioned }
             val b = c.boundsInRoot()
-            if (b.width < 1f || b.height < 1f) st.removeObstacle(key)
-            else st.putObstacle(key, b.left, b.top, b.right, b.bottom, rad)
+            if (b.width < 1f || b.height < 1f) { known[0] = false; st.removeObstacle(key); return@onGloballyPositioned }
+            last[0] = b.left; last[1] = b.top; last[2] = b.right; last[3] = b.bottom; known[0] = true
+            if (active) st.putObstacle(key, b.left, b.top, b.right, b.bottom, rad)
+            else st.removeObstacle(key)
         }
     }
 }

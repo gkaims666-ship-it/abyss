@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Note
 import androidx.compose.material.icons.filled.Translate
@@ -67,6 +68,7 @@ import com.abyss.app.ui.i18n.Strings
 
 private enum class Tool(val icon: ImageVector) {
     Core(Icons.Filled.AutoAwesome),
+    Radar(Icons.Filled.Flight),
     Translator(Icons.Filled.Translate),
     Notes(Icons.Filled.Note),
     Alarms(Icons.Filled.Alarm),
@@ -74,11 +76,11 @@ private enum class Tool(val icon: ImageVector) {
     Vpn(Icons.Filled.VpnKey);
 
     fun title(S: Strings) = when (this) {
-        Core -> S.toolCore; Translator -> S.toolTranslator; Notes -> S.toolNotes
+        Core -> S.toolCore; Radar -> S.toolRadar; Translator -> S.toolTranslator; Notes -> S.toolNotes
         Alarms -> S.toolAlarms; Calculator -> S.toolCalculator; Vpn -> S.toolVpn
     }
     fun blurb(S: Strings) = when (this) {
-        Core -> S.toolCoreBlurb; Translator -> S.toolTranslatorBlurb; Notes -> S.toolNotesBlurb
+        Core -> S.toolCoreBlurb; Radar -> S.toolRadarBlurb; Translator -> S.toolTranslatorBlurb; Notes -> S.toolNotesBlurb
         Alarms -> S.toolAlarmsBlurb; Calculator -> S.toolCalculatorBlurb; Vpn -> S.toolVpnBlurb
     }
 }
@@ -86,7 +88,7 @@ private enum class Tool(val icon: ImageVector) {
 @Composable
 fun ToolsHub(palette: AbyssPalette) {
     var open by remember { mutableStateOf<Tool?>(null) }
-    BackHandler(enabled = open != null) { open = null }
+    BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (open != null)) { open = null }
 
     AnimatedContent(
         targetState = open,
@@ -110,6 +112,7 @@ fun ToolsHub(palette: AbyssPalette) {
                 Box(Modifier.fillMaxSize()) {
                     when (current) {
                         Tool.Core -> CoreScreen(palette)
+                        Tool.Radar -> com.abyss.app.ui.feature.radar.RadarScreen(palette)
                         Tool.Calculator -> CalculatorScreen(palette)
                         Tool.Notes -> NotesScreen(palette)
                         Tool.Alarms -> AlarmsScreen(palette)

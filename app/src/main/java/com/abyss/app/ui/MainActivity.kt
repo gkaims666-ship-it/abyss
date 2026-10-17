@@ -10,6 +10,21 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.key
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
+import com.abyss.app.ui.components.LocalTabActive
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlin.math.abs
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.abyss.app.ui.components.AbyssIntro
@@ -29,7 +44,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -99,18 +113,23 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AbyssRoot() {
     val vm: ChatViewModel = viewModel()
-    val state by vm.state.collectAsState()
-    val palette = Palettes.byId(state.settings.paletteId)
+    // Only what the root needs: re-running the whole app shell on every streamed
+    // token (≈30×/s) was a steady source of dropped frames.
+    val settings by remember(vm) { vm.state.map { it.settings }.distinctUntilChanged() }
+        .collectAsState(vm.state.value.settings)
+    val chatEmpty by remember(vm) { vm.state.map { it.messages.isEmpty() }.distinctUntilChanged() }
+        .collectAsState(vm.state.value.messages.isEmpty())
+    val palette = Palettes.byId(settings.paletteId)
     var tab by remember { mutableStateOf(Tab.Chat) }
     val imeVisible = WindowInsets.isImeVisible
     val bg = rememberAbyssBackgroundState()
     // UI language: "system" follows the phone's locale; otherwise the user's pick.
-    val strings = remember(state.settings.language) { I18n.resolve(state.settings.language) }
+    val strings = remember(settings.language) { I18n.resolve(settings.language) }
     SideEffect { I18n.current = strings }
 
     // System back: from Tools/Settings go to Chat instead of leaving the app.
     // (Nested screens register their own handlers later, so they win first.)
-    BackHandler(enabled = tab != Tab.Chat) { tab = Tab.Chat }
+    BackHandler(enabled = com.abyss.app.ui.components.LocalTabActive.current && (tab != Tab.Chat)) { tab = Tab.Chat }
 
     // Status/nav bar icons must contrast with the theme (dark icons on Ivory).
     val view = LocalView.current
@@ -137,7 +156,18 @@ private fun AbyssRoot() {
 
     // Glyphs fully alive on the empty start page; softened under content.
     val dim by animateFloatAsState(
-        if (tab == Tab.Chat && state.messages.isEmpty()) 0f else 0.45f, tween(600), label = "dim")
+        if (tab == Tab.Chat && chatEmpty) 0f else 0.45f, tween(600), label = "dim")
+
+    // Tab position as a float (0 = Chat, 1 = Tools, 2 = Settings). A critically
+    // damped spring: interrupt it mid-way and it simply re-aims, no jump.
+    val pos = remember { Animatable(0f) }
+    LaunchedEffect(tab) { pos.animateTo(tab.ordinal.toFloat(), spring(dampingRatio = 1f, stiffness = 380f)) }
+    // Tabs are composed once and kept alive. Chat now; the others shortly after
+    // launch, while nothing is moving, so the first switch is already instant.
+    var warm by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(1600); warm = true }
+    var visited by remember { mutableStateOf(setOf(Tab.Chat)) }
+    LaunchedEffect(tab) { visited = visited + tab }
 
     CompositionLocalProvider(LocalStrings provides strings, LocalAbyssField provides bg) {
     AbyssTheme(palette = palette) {
@@ -158,23 +188,19 @@ private fun AbyssRoot() {
                     }
                 },
             ) { inner ->
-                AnimatedContent(
-                    targetState = tab,
-                    transitionSpec = {
-                        val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                        // Slide only here; the fade is fadeLayer() below (no offscreen buffers).
-                        slideInHorizontally(tween(300)) { it / 4 * dir }
-                            .togetherWith(slideOutHorizontally(tween(220)) { -it / 4 * dir })
-                    },
-                    modifier = Modifier.fillMaxSize().padding(bottom = inner.calculateBottomPadding()),
-                    label = "tab",
-                ) { current ->
-                    Box(Modifier.fillMaxSize().then(fadeLayer(300, 180))) {
-                        when (current) {
-                            Tab.Chat -> ChatScreen(vm = vm, palette = palette, onOpenSettings = { tab = Tab.Settings })
-                            Tab.Tools -> Box(Modifier.fillMaxSize().statusBarsPadding()) { ToolsHub(palette = palette) }
-                            Tab.Settings -> Box(Modifier.fillMaxSize().statusBarsPadding()) {
-                                SettingsHost(vm = vm, palette = palette)
+                Box(Modifier.fillMaxSize().padding(bottom = inner.calculateBottomPadding())) {
+                    for (t in Tab.entries) {
+                        key(t) {
+                            if (warm || t in visited) {
+                                TabPage(t, current = tab, pos = pos) {
+                                    when (t) {
+                                        Tab.Chat -> ChatScreen(vm = vm, palette = palette, onOpenSettings = { tab = Tab.Settings })
+                                        Tab.Tools -> Box(Modifier.fillMaxSize().statusBarsPadding()) { ToolsHub(palette = palette) }
+                                        Tab.Settings -> Box(Modifier.fillMaxSize().statusBarsPadding()) {
+                                            SettingsHost(vm = vm, palette = palette)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -197,6 +223,39 @@ private fun AbyssRoot() {
             }
         }
     }
+    }
+}
+
+/**
+ * One kept-alive tab. The switch animation touches only this layer's
+ * translation and alpha, read inside graphicsLayer — so it runs on the render
+ * thread every frame without recomposing, re-measuring or re-recording the
+ * screen. Hidden tabs are skipped when drawing, swallow touches, and tell
+ * their content (back handlers, water obstacles) that they are inactive.
+ */
+@Composable
+private fun TabPage(t: Tab, current: Tab, pos: Animatable<Float, *>, content: @Composable () -> Unit) {
+    val active = t == current
+    val idx = t.ordinal.toFloat()
+    val onScreen by remember { derivedStateOf { abs(pos.value - idx) < 0.995f } }
+    Box(
+        Modifier
+            .fillMaxSize()
+            .zIndex(if (active) 1f else 0f)
+            .graphicsLayer {
+                val d = pos.value - idx
+                alpha = (1f - abs(d) * 1.4f).coerceIn(0f, 1f)
+                translationX = -d * size.width * 0.18f
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
+            .drawWithContent { if (onScreen) drawContent() }
+            .then(if (active) Modifier else Modifier.pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                }
+            }),
+    ) {
+        CompositionLocalProvider(LocalTabActive provides active) { content() }
     }
 }
 
