@@ -82,6 +82,15 @@
             </intent-filter>
         </service>
 
+        <!-- Restart the alert watcher after reboot / app update, if the user enabled it -->
+        <receiver android:name=".feature.radar.AlertBootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Civil-defence air-raid alert watcher (region-level public alerts only) -->
         <service
             android:name=".feature.radar.AlertService"
