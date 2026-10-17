@@ -19,9 +19,28 @@ class LocalLlmProvider : LlmProvider {
 
     override fun stream(request: LlmRequest, apiKey: String): Flow<LlmChunk> = flow {
         if (!LlamaBridge.available)
-            throw LlmError.Network(RuntimeException("Local model not built into this APK (opt-in)"))
-        if (!LlamaBridge.isLoaded)
-            throw LlmError.Network(RuntimeException("No local model loaded — download & select one in Core"))
+            throw LlmError.Network(RuntimeException(
+                "This build doesn't include the on-device engine. Pick Google AI Studio for an instant free model."))
+
+        // Not loaded yet → make sure provisioning is running and report progress
+        // honestly rather than crashing. The download happens once, then it's
+        // fully offline with no key.
+        if (!LlamaBridge.isLoaded) {
+            val mgr = com.abyss.app.core.ServiceLocator.localModel
+            mgr.autoStart()
+            if (!mgr.ready()) {
+                val p = mgr.progress.value
+                val pct = p?.takeIf { it.total > 0 }?.let { (it.bytes * 100 / it.total).toInt() }
+                val where = if (pct != null) "downloading the on-device model ($pct%)"
+                            else "setting up the on-device model"
+                emit(LlmChunk(
+                    "I'm $where. It downloads once (~1.1 GB) and then runs fully offline with no key — " +
+                    "watch progress in Core. For an instant free model right now, open Settings → Model and " +
+                    "pick Google AI Studio (one free key, no card)."))
+                emit(LlmChunk("", done = true))
+                return@flow
+            }
+        }
 
         val prompt = buildPrompt(request)
         val out = LlamaBridge.generate(prompt, request.maxTokens, request.temperature.toFloat())

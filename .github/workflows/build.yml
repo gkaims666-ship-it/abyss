@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90   # compiling llama.cpp for arm64 is the long pole
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +28,8 @@ jobs:
           SDKMGR=$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -n 1)
           echo "Using sdkmanager at: $SDKMGR"
           yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
-          "$SDKMGR" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$SDKMGR" "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
+                    "ndk;27.1.12297006" "cmake;3.22.1"
 
       - name: Download Gradle
         run: |
@@ -40,7 +42,9 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log
+          # -PwithLocalLlm compiles the on-device engine (llama.cpp, arm64) into
+          # the APK so the keyless local model works out of the box.
+          gradle assembleDebug -PwithLocalLlm --no-daemon --stacktrace 2>&1 | tee build.log
 
       # Surface compiler errors as annotations (readable without downloading logs).
       - name: Report build errors

@@ -24,5 +24,10 @@ class AbyssApp : Application() {
         // Register background self-improvement (the worker itself respects the
         // on/off toggle, so this is safe to schedule unconditionally).
         runCatching { HarvestScheduler.schedule(this, 6) }
+
+        // First-run on-device AI: if the engine is in this build, provision the
+        // keyless local model in the background (load an existing one, else
+        // download the default once) so chat works with no key and no account.
+        runCatching { ServiceLocator.localModel.autoStart() }
     }
 }

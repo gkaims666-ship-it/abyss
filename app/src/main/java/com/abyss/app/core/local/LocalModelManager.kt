@@ -2,10 +2,15 @@ package com.abyss.app.core.local
 
 import android.content.Context
 import com.abyss.app.core.net.Http
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.Request
 import java.io.File
@@ -21,6 +26,44 @@ import java.io.File
 class LocalModelManager(context: Context) {
 
     private val dir = File(context.filesDir, "models").apply { mkdirs() }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val readyLock = Mutex()
+    @Volatile private var autoStarted = false
+
+    companion object {
+        /** Default keyless model: downloaded once on first run, then fully offline. */
+        const val DEFAULT_URL =
+            "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+        const val DEFAULT_NAME = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+        const val DEFAULT_LABEL = "Qwen2.5 1.5B Instruct (Q4_K_M, ~1.1 GB)"
+    }
+
+    /** True once the engine is present and a model is loaded (ready to answer). */
+    fun ready(): Boolean = LlamaBridge.available && LlamaBridge.isLoaded
+
+    /** True when this APK was built with the on-device engine. */
+    fun enginePresent(): Boolean = LlamaBridge.available
+
+    /**
+     * First-run provisioning, fired once from app start (and again on first chat
+     * if needed). If a model is already downloaded it is loaded; otherwise the
+     * default model is downloaded and then loaded. No key, no account — when it
+     * finishes the app has a working AI entirely on the device.
+     */
+    fun autoStart() {
+        if (autoStarted || !LlamaBridge.available) return
+        autoStarted = true
+        scope.launch { runCatching { ensureReady() } }
+    }
+
+    /** Make sure a model is loaded; download the default if none exists yet. */
+    suspend fun ensureReady(): Boolean = readyLock.withLock {
+        if (!LlamaBridge.available) return@withLock false
+        if (LlamaBridge.isLoaded) return@withLock true
+        val existing = listModels().firstOrNull()
+        val file = existing ?: download(DEFAULT_URL, DEFAULT_NAME).getOrNull() ?: return@withLock false
+        load(file)
+    }
 
     data class DownloadProgress(val bytes: Long, val total: Long, val done: Boolean, val error: String? = null)
 
