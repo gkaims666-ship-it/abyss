@@ -173,6 +173,7 @@ private class RadarController(private val app: Context, private val scope: Corou
     var measureTotalNm by mutableStateOf(0.0)
     private val measurePts = ArrayList<GeoPoint>()
     var orientation by mutableStateOf(0f)
+    var me by mutableStateOf<DoubleArray?>(null)
 
     var lastFetch = 0L
     var movedAt = 0L
@@ -621,10 +622,11 @@ private class RadarController(private val app: Context, private val scope: Corou
     }
 
     private fun showMe(loc: Location) {
-        val me = doubleArrayOf(loc.latitude, loc.longitude)
-        overlay?.me = me
+        val here = doubleArrayOf(loc.latitude, loc.longitude)
+        me = here
+        overlay?.me = here
         following = false
-        map?.controller?.animateTo(GeoPoint(me[0], me[1]), 9.0, 800L)
+        map?.controller?.animateTo(GeoPoint(here[0], here[1]), 9.0, 800L)
     }
 }
 
