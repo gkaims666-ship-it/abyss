@@ -89,6 +89,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -182,9 +183,15 @@ private fun AbyssRoot() {
     // Tab position as a float (0 = Chat, 1 = Tools, 2 = Settings). A critically
     // damped spring: interrupt it mid-way and it simply re-aims, no jump.
     val pos = remember { Animatable(0f) }
+    // Which tab the current slide started from — so a jump over a middle tab
+    // (Chat↔Settings) can keep that middle page from flashing across the screen.
+    var fromIdx by remember { mutableIntStateOf(0) }
     LaunchedEffect(tab) {
+        fromIdx = pos.value.roundToInt()
         bg.transitioning = true
-        try { pos.animateTo(tab.ordinal.toFloat(), spring(dampingRatio = 1f, stiffness = 380f)) }
+        // Far jumps (distance 2) resolve faster so the pass doesn't drag.
+        val stiff = if (kotlin.math.abs(tab.ordinal - pos.value) > 1f) 620f else 380f
+        try { pos.animateTo(tab.ordinal.toFloat(), spring(dampingRatio = 1f, stiffness = stiff)) }
         finally { bg.transitioning = false }
     }
     // Tabs are composed once and kept alive. Chat now; the others shortly after
@@ -257,7 +264,7 @@ private fun AbyssRoot() {
                     for (t in Tab.entries) {
                         key(t) {
                             if (warm || t in visited) {
-                                TabPage(t, current = tab, pos = pos) {
+                                TabPage(t, current = tab, pos = pos, fromIdx = fromIdx) {
                                     when (t) {
                                         Tab.Chat -> ChatScreen(vm = vm, palette = palette, onOpenSettings = { tab = Tab.Settings })
                                         Tab.Tools -> Box(Modifier.fillMaxSize().statusBarsPadding()) { ToolsHub(palette = palette) }
@@ -337,10 +344,15 @@ private fun BlackHoleOverlay(state: AbyssBackgroundState, palette: AbyssPalette)
  * obstacles) that they are inactive.
  */
 @Composable
-private fun TabPage(t: Tab, current: Tab, pos: Animatable<Float, *>, content: @Composable () -> Unit) {
+private fun TabPage(t: Tab, current: Tab, pos: Animatable<Float, *>, fromIdx: Int, content: @Composable () -> Unit) {
     val active = t == current
     val idx = t.ordinal.toFloat()
-    val onScreen by remember { derivedStateOf { abs(pos.value - idx) < 1.02f } }
+    // Draw only the pages touched by this slide (the one we left and the one we
+    // land on). A middle tab we jump over (Chat→Settings) stays undrawn, so its
+    // content never flashes across the screen mid-slide.
+    val onScreen by remember(fromIdx, current) { derivedStateOf {
+        abs(pos.value - idx) < 1.02f && (t == current || t.ordinal == fromIdx)
+    } }
     Box(
         Modifier
             .fillMaxSize()
