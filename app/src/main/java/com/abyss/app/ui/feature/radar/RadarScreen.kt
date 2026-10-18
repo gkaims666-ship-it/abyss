@@ -533,7 +533,22 @@ private class RadarController(private val app: Context, private val scope: Corou
                 }
             }
             record(list)
-            planes = list
+            // Keep aircraft sticky between ticks so a plane that a network drops
+            // for one fetch doesn't blink off the map: carry recent planes forward
+            // (they keep gliding by dead-reckoning) and expire only a truly stale
+            // fix (> 90 s). Only for the area views; the targeted filters replace.
+            if (f == RadarFilter.All || f == RadarFilter.Airborne) {
+                val tn = System.currentTimeMillis()
+                val merged = LinkedHashMap<String, Plane>()
+                planes.forEach { if (it.ageSec(tn) < 90.0) merged[it.hex] = it }
+                list.forEach { merged[it.hex] = it }
+                planes = merged.values
+                    .filter { it.ageSec(tn) < 90.0 }
+                    .sortedBy { it.ageSec(tn) }
+                    .take(600)
+            } else {
+                planes = list
+            }
             offline = false
             lastOk = System.currentTimeMillis()
             selected?.let { s ->
@@ -1594,17 +1609,18 @@ fun RadarScreen(palette: AbyssPalette) {
 
     // Both loops pause while the Tools tab is hidden (the tab stays alive).
     val active = LocalTabActive.current
-    // Data loop: every 6 s, or soon after the map stops moving.
+    // Data loop: every 1.5 s (4× the old 6 s cadence), or right after the map
+    // stops moving. Aircraft stay merged between ticks so they don't flicker.
     LaunchedEffect(mapReady, active) {
         if (!mapReady || !active) return@LaunchedEffect
         while (true) {
             val now = System.currentTimeMillis()
-            val settled = ctl.dirty && now - ctl.movedAt > 650 && now - ctl.lastFetch > 1200
-            if (settled || now - ctl.lastFetch > 6000) {
+            val settled = ctl.dirty && now - ctl.movedAt > 500 && now - ctl.lastFetch > 700
+            if (settled || now - ctl.lastFetch > 1500) {
                 ctl.dirty = false
                 ctl.refresh()
             }
-            delay(250)
+            delay(200)
         }
     }
     // Frame loop: aircraft glide at the display's refresh rate.
