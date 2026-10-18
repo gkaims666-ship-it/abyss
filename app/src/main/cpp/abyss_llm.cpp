@@ -1,6 +1,7 @@
 // JNI bridge between Abyss (Kotlin) and llama.cpp. Built only when the project
-// is compiled with -PwithLocalLlm. Best-effort against llama.cpp tag b4404;
-// if you bump the tag in CMakeLists and the API shifts, adjust here.
+// is compiled with -PwithLocalLlm. Written against the vocab-split API in
+// llama.cpp tag b5596 (see CMakeLists). If you bump the tag and the API shifts,
+// adjust the symbols here.
 #include <jni.h>
 #include <android/log.h>
 #include <string>

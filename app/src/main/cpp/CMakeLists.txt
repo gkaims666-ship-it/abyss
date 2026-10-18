@@ -13,11 +13,14 @@ set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL           OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP          OFF CACHE BOOL "" FORCE)
 
-# Pinned for reproducibility. Bump if the bridge API below needs a newer one.
+# Pinned for reproducibility. b5596 provides the vocab-split API the bridge uses
+# (llama_model_load_from_file / llama_init_from_model / llama_model_get_vocab /
+# llama_vocab / llama_vocab_is_eog). b4404 predated it and the bridge failed to
+# compile. Bump only together with abyss_llm.cpp if the API shifts again.
 FetchContent_Declare(
     llama_cpp
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
-    GIT_TAG        b4404
+    GIT_TAG        b5596
 )
 FetchContent_MakeAvailable(llama_cpp)
 
