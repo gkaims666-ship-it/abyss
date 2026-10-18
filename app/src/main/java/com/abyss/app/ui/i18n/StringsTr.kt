@@ -157,6 +157,8 @@ object StringsTr : Strings() {
     override val reviewRunning = "İnceleniyor…"
     override val reviewCopy = "Kopyala"
     override val reviewIdle = "Çalıştır'a dokun. İnceleme canlı kodu GitHub'dan ve bu cihazın kare ölçümlerini okur."
+    override val localReady = "Hazır · çevrimdışı, anahtarsız"
+    override val localDownloading = "Model indiriliyor…"
 
     override val searchHint = "Ara…"
     override val newNote = "Yeni not"

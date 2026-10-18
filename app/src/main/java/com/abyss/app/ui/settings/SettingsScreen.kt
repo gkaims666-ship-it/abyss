@@ -116,6 +116,8 @@ fun SettingsScreen(
     val keyStore = ServiceLocator.keyStore
     val store = ServiceLocator.settings
     val scope = rememberCoroutineScope()
+    // Live status of the keyless on-device model (downloading / ready).
+    val localDl by ServiceLocator.localModel.progress.collectAsState(initial = null)
     val context = LocalContext.current
 
     val keyFields = remember {
@@ -200,8 +202,18 @@ fun SettingsScreen(
                         ProviderRegistry.all.forEachIndexed { i, p ->
                             if (i > 0) Divider(palette)
                             val selected = s.providerId == p.id
+                            val subtitle = when {
+                                p.keyless -> when {
+                                    ServiceLocator.localModel.ready() -> S.localReady
+                                    localDl != null && !localDl!!.done && localDl!!.total > 0 ->
+                                        "${S.localDownloading} ${localDl!!.bytes * 100 / localDl!!.total}%"
+                                    else -> S.providerOnDevice
+                                }
+                                selected -> s.model
+                                else -> statusText(S, p, keySet[p.id] == true)
+                            }
                             RadioRow(palette, title = p.displayName,
-                                subtitle = if (selected) s.model else statusText(S, p, keySet[p.id] == true),
+                                subtitle = subtitle,
                                 selected = selected) {
                                 vm.setProvider(p.id)
                                 vm.setModel(p.models.firstOrNull() ?: "")

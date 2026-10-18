@@ -156,6 +156,8 @@ abstract class Strings {
     abstract val reviewRunning: String
     abstract val reviewCopy: String
     abstract val reviewIdle: String
+    abstract val localReady: String
+    abstract val localDownloading: String
 
     // ---- notes
     abstract val searchHint: String

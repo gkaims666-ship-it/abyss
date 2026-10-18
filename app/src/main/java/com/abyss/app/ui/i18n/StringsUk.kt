@@ -157,6 +157,8 @@ object StringsUk : Strings() {
     override val reviewRunning = "Аналіз…"
     override val reviewCopy = "Копіювати"
     override val reviewIdle = "Натисніть «Запустити». Огляд читає живий код з GitHub і метрики кадрів цього пристрою."
+    override val localReady = "Готова · офлайн, без ключа"
+    override val localDownloading = "Завантаження моделі…"
 
     override val searchHint = "Пошук…"
     override val newNote = "Нова нотатка"

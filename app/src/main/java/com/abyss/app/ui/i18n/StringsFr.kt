@@ -157,6 +157,8 @@ object StringsFr : Strings() {
     override val reviewRunning = "Analyse…"
     override val reviewCopy = "Copier"
     override val reviewIdle = "Appuyez sur Lancer. La revue lit le code en direct depuis GitHub et les métriques d'images de cet appareil."
+    override val localReady = "Prêt · hors ligne, sans clé"
+    override val localDownloading = "Téléchargement du modèle…"
 
     override val searchHint = "Rechercher…"
     override val newNote = "Nouvelle note"

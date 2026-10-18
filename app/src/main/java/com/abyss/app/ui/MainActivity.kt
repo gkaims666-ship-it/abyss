@@ -204,6 +204,8 @@ private fun AbyssRoot() {
     val holeAnim = remember { Animatable(0f) }
     LaunchedEffect(bg.holeToggleReq) {
         if (bg.holeToggleReq == 0) return@LaunchedEffect
+        // A firm tap as the singularity opens / releases.
+        runCatching { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) }
         val toSave = !bg.powerSave
         bg.holeExpand = !toSave
         bg.holeActive = true

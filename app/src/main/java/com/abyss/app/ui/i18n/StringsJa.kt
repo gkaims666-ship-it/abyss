@@ -157,6 +157,8 @@ object StringsJa : Strings() {
     override val reviewRunning = "レビュー中…"
     override val reviewCopy = "コピー"
     override val reviewIdle = "実行をタップ。GitHub のライブソースとこの端末のフレーム計測を読み取ります。"
+    override val localReady = "準備完了 · オフライン、キー不要"
+    override val localDownloading = "モデルをダウンロード中…"
 
     override val searchHint = "検索…"
     override val newNote = "新しいメモ"
