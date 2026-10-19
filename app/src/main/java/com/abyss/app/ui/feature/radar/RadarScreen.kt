@@ -1512,7 +1512,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         computeNav()
     }
 
-    fun setNavMode(m: NavMode) {
+    fun switchNavMode(m: NavMode) {
         if (m == navMode && navResult != null) return
         navMode = m
         if (navTo != null) computeNav()
@@ -3328,9 +3328,9 @@ private fun NavSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) {
         if (ctl.navFromCenter) Text(S.navFromCenter, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 11.5.sp,
             modifier = Modifier.padding(horizontal = 18.dp).padding(bottom = 6.dp))
         Row(Modifier.padding(horizontal = 18.dp).padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            LayerChip(S.navCar, ctl.navMode == NavMode.Car, palette) { ctl.setNavMode(NavMode.Car) }
-            LayerChip(S.navFoot, ctl.navMode == NavMode.Foot, palette) { ctl.setNavMode(NavMode.Foot) }
-            LayerChip(S.navBike, ctl.navMode == NavMode.Bike, palette) { ctl.setNavMode(NavMode.Bike) }
+            LayerChip(S.navCar, ctl.navMode == NavMode.Car, palette) { ctl.switchNavMode(NavMode.Car) }
+            LayerChip(S.navFoot, ctl.navMode == NavMode.Foot, palette) { ctl.switchNavMode(NavMode.Foot) }
+            LayerChip(S.navBike, ctl.navMode == NavMode.Bike, palette) { ctl.switchNavMode(NavMode.Bike) }
         }
         val steps = res?.best?.steps.orEmpty()
         if (steps.isNotEmpty()) LazyColumn(Modifier.padding(bottom = 10.dp)) {
