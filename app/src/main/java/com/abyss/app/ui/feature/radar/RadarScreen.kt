@@ -164,6 +164,13 @@ import com.abyss.app.feature.radar.RadarSnapshot
 import com.abyss.app.feature.radar.RadarSource
 import com.abyss.app.feature.radar.Country
 import com.abyss.app.feature.radar.GeoApi
+import com.abyss.app.feature.radar.NavApi
+import com.abyss.app.feature.radar.NavKeys
+import com.abyss.app.feature.radar.NavMode
+import com.abyss.app.feature.radar.NavResult
+import com.abyss.app.feature.radar.NavRoute
+import com.abyss.app.feature.radar.NavStep
+import androidx.compose.material.icons.filled.Directions
 import com.abyss.app.feature.radar.PoliticalMap
 import com.abyss.app.feature.radar.MapEvent
 import com.abyss.app.feature.radar.EventFilter
@@ -229,6 +236,8 @@ private const val KEY_TOMTOM = "tomtom"
 private const val KEY_HERE = "here"
 private const val KEY_WINDY = "windy"
 private const val KEY_ALERTS = "alertsua"
+private const val KEY_GH = "graphhopper"
+private const val KEY_ORS = "ors"
 
 private fun shelterEmoji(k: ShelterKind): String = when (k) {
     ShelterKind.Bomb -> "🛡️"; ShelterKind.Metro -> "🚇"; ShelterKind.Underground -> "🅿️"
@@ -280,6 +289,16 @@ private class RadarController(private val app: Context, private val scope: Corou
     var layer by mutableStateOf(BaseLayer.Abyss)
     var weatherOn by mutableStateOf(false)
     var bordersOn by mutableStateOf(false)
+    // In-app routing (OSRM + GraphHopper + OpenRouteService, consensus-picked).
+    var navResult by mutableStateOf<NavResult?>(null)
+    var navLoading by mutableStateOf(false)
+    var navFailed by mutableStateOf(false)
+    var navMode by mutableStateOf(NavMode.Car)
+    var navFromCenter by mutableStateOf(false)
+    private var navTo: DoubleArray? = null
+    private var navFolder: FolderOverlay? = null
+    private var navColor = 0xFF4FC3F7.toInt()
+    private var navJob: kotlinx.coroutines.Job? = null
     var wikiOn by mutableStateOf(false)
     var eventsOn by mutableStateOf(false)
     var eventFilter by mutableStateOf(EventFilter())
@@ -416,6 +435,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         camFolder = FolderOverlay().also { mv.overlays.add(it) }
         shelterFolder = FolderOverlay().also { mv.overlays.add(it) }
         eventsFolder = FolderOverlay().also { mv.overlays.add(it) }
+        navFolder = FolderOverlay().also { mv.overlays.add(it) }
 
         val ov = PlaneOverlay(ctx.resources.displayMetrics.density)
         ov.onTap = { p -> select(p) }
@@ -477,6 +497,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         ov.labelColor = (p.onBackground.copy(alpha = 0.8f)).toArgb()
         ov.outlineColor = (p.background.copy(alpha = 0.75f)).toArgb()
         ov.emergencyColor = p.error.toArgb()
+        if (navColor != p.primary.toArgb()) { navColor = p.primary.toArgb(); drawNav() }
     }
 
     fun saveCamera() {
@@ -1472,15 +1493,111 @@ private class RadarController(private val app: Context, private val scope: Corou
     fun clearNearest() { nearestShelters = null }
 
     /** Walking directions to a shelter in the user's map app (OSM fallback). */
+    /** Shelters: walk there, routed in-app. */
     fun routeTo(sh: Shelter) {
-        val from = me
-        val geo = "geo:${sh.lat},${sh.lon}?q=${sh.lat},${sh.lon}(" + enc(sh.name ?: "Shelter") + ")"
-        val osm = if (from != null)
-            "https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=${from[0]}%2C${from[1]}%3B${sh.lat}%2C${sh.lon}"
-        else "https://www.openstreetmap.org/?mlat=${sh.lat}&mlon=${sh.lon}#map=17/${sh.lat}/${sh.lon}"
-        runCatching {
-            app.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(geo)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.onFailure { openUrl(osm) }
+        selectedShelter = null
+        clearNearest()
+        routeToPoint(sh.lat, sh.lon, NavMode.Foot)
+    }
+
+    // ------------------------------------------------------------ routing
+
+    fun navKeys() = NavKeys(keyStore.getKey(KEY_GH), keyStore.getKey(KEY_ORS))
+
+    /** Route from my GPS position (or the map centre without one) to [lat]/[lon]. */
+    fun routeToPoint(lat: Double, lon: Double, mode: NavMode = navMode) {
+        navTo = doubleArrayOf(lat, lon)
+        navMode = mode
+        clearPin()
+        computeNav()
+    }
+
+    fun setNavMode(m: NavMode) {
+        if (m == navMode && navResult != null) return
+        navMode = m
+        if (navTo != null) computeNav()
+    }
+
+    private fun computeNav() {
+        val to = navTo ?: return
+        val here = me
+        val from = here ?: doubleArrayOf(cam.lat, cam.lon)
+        navFromCenter = here == null
+        navLoading = true; navFailed = false
+        navJob?.cancel()
+        navJob = scope.launch {
+            val res = runCatching {
+                NavApi.route(from[0], from[1], to[0], to[1], navMode, currentLang, navKeys())
+            }.getOrNull()
+            navLoading = false
+            if (res == null) { navFailed = true; navResult = null; drawNav(); return@launch }
+            navResult = res
+            drawNav()
+            fitNav(res.best)
+        }
+    }
+
+    fun clearNav() {
+        navJob?.cancel()
+        navTo = null; navResult = null; navLoading = false; navFailed = false
+        drawNav()
+    }
+
+    fun focusStep(st: NavStep) {
+        flyTo(st.lat, st.lon, (map?.zoomLevelDouble ?: 15.0).coerceAtLeast(16.0))
+    }
+
+    private fun drawNav() {
+        val mv = map ?: return
+        val folder = navFolder ?: return
+        folder.items.clear()
+        val r = navResult?.best
+        if (r != null) {
+            val d = app.resources.displayMetrics.density
+            val gp = r.points.map { GeoPoint(it[0], it[1]) }
+            val casing = Polyline().apply {
+                setPoints(gp)
+                outlinePaint.color = 0xCC0B0F14.toInt()
+                outlinePaint.strokeWidth = 9.5f * d
+                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                outlinePaint.isAntiAlias = true
+            }
+            val line = Polyline().apply {
+                setPoints(gp)
+                outlinePaint.color = navColor
+                outlinePaint.strokeWidth = 6f * d
+                outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                outlinePaint.isAntiAlias = true
+                if (navMode == NavMode.Foot)
+                    outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(2f * d, 9f * d), 0f)
+            }
+            folder.add(casing); folder.add(line)
+            gp.lastOrNull()?.let { end ->
+                folder.add(Marker(mv).apply {
+                    position = end
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    setInfoWindow(null)
+                })
+            }
+        }
+        mv.invalidate()
+    }
+
+    /** Frame the whole route, leaving room for the bottom sheet. */
+    private fun fitNav(r: NavRoute) {
+        val mv = map ?: return
+        if (r.points.isEmpty() || mv.width == 0) return
+        var n = -90.0; var s = 90.0; var e = -180.0; var w = 180.0
+        for (p in r.points) { n = maxOf(n, p[0]); s = minOf(s, p[0]); e = maxOf(e, p[1]); w = minOf(w, p[1]) }
+        val latSpan = (n - s).coerceAtLeast(0.002)
+        val lonSpan = (e - w).coerceAtLeast(0.002)
+        val zLon = kotlin.math.ln(mv.width * 360.0 / (256.0 * lonSpan * 1.35)) / kotlin.math.ln(2.0)
+        val zLat = kotlin.math.ln(mv.height * 0.55 * 170.0 / (256.0 * latSpan * 1.35)) / kotlin.math.ln(2.0)
+        val z = minOf(zLon, zLat).coerceIn(3.0, 17.5)
+        // Shift the centre a little south so the route sits above the sheet.
+        flyTo((n + s) / 2.0 - latSpan * 0.18, (e + w) / 2.0, z)
     }
 
     private fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
@@ -1931,6 +2048,7 @@ fun RadarScreen(palette: AbyssPalette) {
                         saved = ctl.pinSaved(), onSave = { ctl.toggleSavePin() },
                         onCopyText = { clipboard.setText(AnnotatedString(it)) },
                         onOpenUrl = { ctl.openUrl(it) },
+                        onRoute = { ctl.routeToPoint(pt[0], pt[1]) },
                         onClose = { ctl.clearPin() })
                 }
             }
@@ -1995,6 +2113,12 @@ fun RadarScreen(palette: AbyssPalette) {
             enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
             PlanesInViewSheet(ctl.planesInView(), ctl.metric, palette, S,
                 onPick = { ctl.focusAndFollow(it) }, onClose = { ctl.planesListOpen = false })
+        }
+
+        val navVisible = ctl.navLoading || ctl.navResult != null || ctl.navFailed
+        AnimatedVisibility(navVisible, modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+            NavSheet(ctl, palette, S)
         }
 
         // Long-press hint, shown briefly when the map is idle and empty-handed.
@@ -2153,6 +2277,7 @@ private fun PinCard(
     pt: DoubleArray, place: Place?, loading: Boolean, me: DoubleArray?, metric: Boolean,
     palette: AbyssPalette, S: Strings, saved: Boolean, onSave: () -> Unit,
     onCopyText: (String) -> Unit, onOpenUrl: (String) -> Unit, onCopy: () -> Unit, onShare: () -> Unit, onClose: () -> Unit,
+    onRoute: () -> Unit = {},
 ) {
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(palette.surface.copy(alpha = 0.97f))
@@ -2232,6 +2357,15 @@ private fun PinCard(
             }
         }
         Spacer(Modifier.height(12.dp))
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(palette.primary)
+            .clickable(onClick = onRoute).padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.Directions, null, tint = palette.onPrimary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(S.navRouteHere, color = palette.onPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PinAction(S.copy, palette, Modifier.weight(1f), onCopy)
             PinAction(S.radarShare, palette, Modifier.weight(1f), onShare)
@@ -2726,6 +2860,10 @@ private fun RoadSection(ctl: RadarController, palette: AbyssPalette, S: Strings)
     KeyField("TomTom", "tomtom", "https://developer.tomtom.com/", ctl, palette, S)
     KeyField("HERE", "here", "https://platform.here.com/", ctl, palette, S)
     KeyField("Windy Webcams", "windy", "https://api.windy.com/keys", ctl, palette, S)
+    Text(S.navKeysHint, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 12.sp, lineHeight = 16.sp,
+        modifier = Modifier.padding(top = 8.dp, bottom = 6.dp))
+    KeyField("GraphHopper", KEY_GH, "https://graphhopper.com/dashboard/#/apikeys", ctl, palette, S)
+    KeyField("OpenRouteService", KEY_ORS, "https://openrouteservice.org/dev/#/signup", ctl, palette, S)
 }
 
 @Composable
@@ -3142,6 +3280,72 @@ private fun ShelterCard(sh: Shelter, me: DoubleArray?, metric: Boolean, palette:
         Text(S.roadSourceLabel + ": OpenStreetMap", color = palette.onSurface.copy(alpha = 0.5f), fontSize = 11.5.sp)
         Spacer(Modifier.height(10.dp))
         WideButton(Icons.Filled.Navigation, S.safetyRoute, palette, onRoute)
+    }
+}
+
+@Composable
+private fun NavSheet(ctl: RadarController, palette: AbyssPalette, S: Strings) {
+    val res = ctl.navResult
+    fun dur(sec: Double): String {
+        val total = (sec / 60.0).let { kotlin.math.round(it).toInt() }.coerceAtLeast(1)
+        val h = total / 60; val m = total % 60
+        return if (h > 0) "$h ${S.navH} $m ${S.navMin}" else "$m ${S.navMin}"
+    }
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding().heightIn(max = 480.dp)
+            .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(palette.surface)
+            .border(1.dp, palette.outline, RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).padding(top = 14.dp),
+    ) {
+        Box(Modifier.align(Alignment.CenterHorizontally).size(width = 34.dp, height = 4.dp)
+            .clip(RoundedCornerShape(2.dp)).background(palette.outline))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Directions, null, tint = palette.primary, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                when {
+                    ctl.navLoading -> Text(S.navLoading, color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 18.sp)
+                    res != null -> {
+                        Text("${dur(res.best.durS)} · ${dist(res.best.distM / 1852.0, ctl.metric, S)}",
+                            color = palette.onBackground, fontFamily = AbyssFonts.Display, fontSize = 20.sp)
+                        val line = if (res.all.size > 1)
+                            "${S.navVerified}: ${res.engines.joinToString(", ")} · ${dur(res.minDurS)}–${dur(res.maxDurS)}"
+                        else res.best.engine
+                        Text(line, color = palette.onSurface.copy(alpha = 0.6f), fontSize = 12.sp, maxLines = 2,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                    else -> Text(S.navFailed, color = palette.error, fontSize = 14.sp)
+                }
+            }
+            if (ctl.navLoading) {
+                androidx.compose.material3.CircularProgressIndicator(color = palette.primary, strokeWidth = 2.dp,
+                    modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+            }
+            Box(Modifier.size(30.dp).clip(CircleShape).clickable { ctl.clearNav() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Close, S.close, tint = palette.onSurface.copy(alpha = 0.7f), modifier = Modifier.size(17.dp))
+            }
+        }
+        if (ctl.navFromCenter) Text(S.navFromCenter, color = palette.onSurface.copy(alpha = 0.55f), fontSize = 11.5.sp,
+            modifier = Modifier.padding(horizontal = 18.dp).padding(bottom = 6.dp))
+        Row(Modifier.padding(horizontal = 18.dp).padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LayerChip(S.navCar, ctl.navMode == NavMode.Car, palette) { ctl.setNavMode(NavMode.Car) }
+            LayerChip(S.navFoot, ctl.navMode == NavMode.Foot, palette) { ctl.setNavMode(NavMode.Foot) }
+            LayerChip(S.navBike, ctl.navMode == NavMode.Bike, palette) { ctl.setNavMode(NavMode.Bike) }
+        }
+        val steps = res?.best?.steps.orEmpty()
+        if (steps.isNotEmpty()) LazyColumn(Modifier.padding(bottom = 10.dp)) {
+            items(steps.size) { i ->
+                val st = steps[i]
+                Row(Modifier.fillMaxWidth().clickable { ctl.focusStep(st) }.padding(horizontal = 18.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("${i + 1}", color = palette.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.width(24.dp))
+                    Text(st.text, color = palette.onSurface, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+                    if (st.distM > 0) Text(dist(st.distM / 1852.0, ctl.metric, S), color = palette.onSurface.copy(alpha = 0.5f),
+                        fontSize = 12.sp)
+                }
+            }
+        }
     }
 }
 

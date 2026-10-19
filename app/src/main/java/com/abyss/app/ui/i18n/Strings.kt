@@ -161,6 +161,17 @@ abstract class Strings {
     abstract val trafficFree: String
     abstract val trafficJam: String
     abstract val radarOverlayBorders: String
+    abstract val navRouteHere: String
+    abstract val navLoading: String
+    abstract val navFailed: String
+    abstract val navVerified: String
+    abstract val navFromCenter: String
+    abstract val navCar: String
+    abstract val navFoot: String
+    abstract val navBike: String
+    abstract val navH: String
+    abstract val navMin: String
+    abstract val navKeysHint: String
 
     // ---- notes
     abstract val searchHint: String
