@@ -159,6 +159,8 @@ object StringsEs : Strings() {
     override val reviewIdle = "Pulsa Ejecutar. La revisión lee el código en vivo desde GitHub y las métricas de fotogramas de este dispositivo."
     override val localReady = "Lista · sin conexión, sin clave"
     override val localDownloading = "Descargando modelo…"
+    override val trafficFree = "Libre"
+    override val trafficJam = "Atasco"
 
     override val searchHint = "Buscar…"
     override val newNote = "Nueva nota"

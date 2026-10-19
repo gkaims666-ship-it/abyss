@@ -590,7 +590,8 @@ private class RadarController(private val app: Context, private val scope: Corou
             sheltersAt = now; scope.launch { refreshShelters() }
         }
         if ((roadOn || camsOn || sheltersOn) && moved) roadDirty = false
-        if (trafficOn && now - trafficAt > 120_000) refreshTraffic()
+        // Live traffic flow refreshes every minute (or right after the map moves).
+        if (trafficOn && (now - trafficAt > 60_000 || (moved && now - trafficAt > 4_000))) refreshTraffic()
     }
 
     /** UI language tag, set by the screen so background lookups match it. */
@@ -1070,8 +1071,9 @@ private class RadarController(private val app: Context, private val scope: Corou
         trafficAt = now
         val (base, ending) = RoadApi.tomtomFlowTiles(key, dark == true)
         val provider = MapTileProviderBasic(app)
+        // Roll the cache key every 60 s so live congestion refreshes each minute.
         provider.setTileSource(XYTileSource(
-            "tt-flow-" + (if (dark == true) "d-" else "l-") + (now / 120_000L), 0, 22, 256, ending, arrayOf(base),
+            "tt-flow-" + (if (dark == true) "d-" else "l-") + (now / 60_000L), 0, 22, 256, ending, arrayOf(base),
         ))
         val ov = TilesOverlay(provider, app)
         ov.loadingBackgroundColor = AndroidColor.TRANSPARENT
@@ -1864,6 +1866,7 @@ fun RadarScreen(palette: AbyssPalette) {
             Spacer(Modifier.height(8.dp))
             ScaleBar(ctl, palette, S)
             StatusPill(ctl, palette, S)
+            if (ctl.trafficOn) TrafficLegend(palette, S)
             Text(S.radarCredit, color = palette.onSurface.copy(alpha = 0.45f), fontSize = 9.5.sp,
                 modifier = Modifier.padding(start = 6.dp, top = 4.dp))
         }
@@ -2274,6 +2277,28 @@ private fun StatusPill(ctl: RadarController, palette: AbyssPalette, S: Strings) 
             if (ctl.offline) palette.error else if (ctl.loading) palette.secondary else Color(0xFF5DBB7B)))
         Spacer(Modifier.width(8.dp))
         Text(text, color = palette.onSurface.copy(alpha = 0.8f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** Compact colour key for the live traffic-flow layer (free → jam). */
+@Composable
+private fun TrafficLegend(palette: AbyssPalette, S: Strings) {
+    Row(
+        Modifier.padding(top = 6.dp).clip(RoundedCornerShape(12.dp))
+            .background(palette.surface.copy(alpha = 0.9f))
+            .border(1.dp, palette.outline, RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(S.trafficFree, color = palette.onSurface.copy(alpha = 0.75f), fontSize = 10.sp)
+        Spacer(Modifier.width(6.dp))
+        Row(Modifier.clip(RoundedCornerShape(3.dp))) {
+            listOf(0xFF3FB36B, 0xFFF2C14E, 0xFFEE7B2F, 0xFFE0453B, 0xFF7A1F1A).forEach {
+                Box(Modifier.width(16.dp).height(7.dp).background(Color(it)))
+            }
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(S.trafficJam, color = palette.onSurface.copy(alpha = 0.75f), fontSize = 10.sp)
     }
 }
 

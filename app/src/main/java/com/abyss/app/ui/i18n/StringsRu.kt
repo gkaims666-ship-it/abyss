@@ -159,6 +159,8 @@ object StringsRu : Strings() {
     override val reviewIdle = "Нажмите «Запустить». Обзор читает живой код с GitHub и метрики кадров этого устройства."
     override val localReady = "Готова · офлайн, без ключа"
     override val localDownloading = "Загрузка модели…"
+    override val trafficFree = "Свободно"
+    override val trafficJam = "Затор"
 
     override val searchHint = "Поиск…"
     override val newNote = "Новая заметка"

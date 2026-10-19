@@ -159,6 +159,8 @@ object StringsZh : Strings() {
     override val reviewIdle = "点按运行。检查会从 GitHub 读取实时源码以及本设备的帧性能数据。"
     override val localReady = "就绪 · 离线，无需密钥"
     override val localDownloading = "正在下载模型…"
+    override val trafficFree = "畅通"
+    override val trafficJam = "拥堵"
 
     override val searchHint = "搜索…"
     override val newNote = "新笔记"

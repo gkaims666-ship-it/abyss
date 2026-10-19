@@ -158,6 +158,8 @@ abstract class Strings {
     abstract val reviewIdle: String
     abstract val localReady: String
     abstract val localDownloading: String
+    abstract val trafficFree: String
+    abstract val trafficJam: String
 
     // ---- notes
     abstract val searchHint: String
