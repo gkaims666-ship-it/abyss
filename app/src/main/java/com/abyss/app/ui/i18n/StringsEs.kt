@@ -161,6 +161,7 @@ object StringsEs : Strings() {
     override val localDownloading = "Descargando modelo…"
     override val trafficFree = "Libre"
     override val trafficJam = "Atasco"
+    override val radarOverlayBorders = "Fronteras de países"
 
     override val searchHint = "Buscar…"
     override val newNote = "Nueva nota"

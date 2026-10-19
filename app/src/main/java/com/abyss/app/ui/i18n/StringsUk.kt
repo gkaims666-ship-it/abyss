@@ -161,6 +161,7 @@ object StringsUk : Strings() {
     override val localDownloading = "Завантаження моделі…"
     override val trafficFree = "Вільно"
     override val trafficJam = "Затор"
+    override val radarOverlayBorders = "Кордони країн"
 
     override val searchHint = "Пошук…"
     override val newNote = "Нова нотатка"

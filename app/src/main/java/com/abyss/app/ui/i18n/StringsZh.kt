@@ -161,6 +161,7 @@ object StringsZh : Strings() {
     override val localDownloading = "正在下载模型…"
     override val trafficFree = "畅通"
     override val trafficJam = "拥堵"
+    override val radarOverlayBorders = "国家边界"
 
     override val searchHint = "搜索…"
     override val newNote = "新笔记"

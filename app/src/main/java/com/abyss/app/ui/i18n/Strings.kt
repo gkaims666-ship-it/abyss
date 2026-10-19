@@ -160,6 +160,7 @@ abstract class Strings {
     abstract val localDownloading: String
     abstract val trafficFree: String
     abstract val trafficJam: String
+    abstract val radarOverlayBorders: String
 
     // ---- notes
     abstract val searchHint: String

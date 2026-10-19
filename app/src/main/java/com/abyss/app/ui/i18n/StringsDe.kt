@@ -161,6 +161,7 @@ object StringsDe : Strings() {
     override val localDownloading = "Modell wird geladen…"
     override val trafficFree = "Frei"
     override val trafficJam = "Stau"
+    override val radarOverlayBorders = "Ländergrenzen"
 
     override val searchHint = "Suchen …"
     override val newNote = "Neue Notiz"

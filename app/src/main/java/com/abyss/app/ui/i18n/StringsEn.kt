@@ -161,6 +161,7 @@ object StringsEn : Strings() {
     override val localDownloading = "Downloading model…"
     override val trafficFree = "Clear"
     override val trafficJam = "Jam"
+    override val radarOverlayBorders = "Country borders"
 
     override val searchHint = "Search…"
     override val newNote = "New note"

@@ -161,6 +161,7 @@ object StringsJa : Strings() {
     override val localDownloading = "モデルをダウンロード中…"
     override val trafficFree = "順調"
     override val trafficJam = "渋滞"
+    override val radarOverlayBorders = "国境"
 
     override val searchHint = "検索…"
     override val newNote = "新しいメモ"

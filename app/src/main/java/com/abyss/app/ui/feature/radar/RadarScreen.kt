@@ -162,7 +162,9 @@ import com.abyss.app.feature.radar.BaseLayer
 import com.abyss.app.feature.radar.FlightInfo
 import com.abyss.app.feature.radar.RadarSnapshot
 import com.abyss.app.feature.radar.RadarSource
+import com.abyss.app.feature.radar.Country
 import com.abyss.app.feature.radar.GeoApi
+import com.abyss.app.feature.radar.PoliticalMap
 import com.abyss.app.feature.radar.MapEvent
 import com.abyss.app.feature.radar.EventFilter
 import com.abyss.app.feature.radar.GeoFormats
@@ -277,6 +279,7 @@ private class RadarController(private val app: Context, private val scope: Corou
     // Map layers + open-data overlays
     var layer by mutableStateOf(BaseLayer.Abyss)
     var weatherOn by mutableStateOf(false)
+    var bordersOn by mutableStateOf(false)
     var wikiOn by mutableStateOf(false)
     var eventsOn by mutableStateOf(false)
     var eventFilter by mutableStateOf(EventFilter())
@@ -357,6 +360,9 @@ private class RadarController(private val app: Context, private val scope: Corou
     private var weatherOverlay: TilesOverlay? = null
     private var weatherTemplate: String? = null
     private var weatherFetchedAt = 0L
+    // Political borders (country outlines + Russian labels), loaded from assets.
+    private var bordersFolder: FolderOverlay? = null
+    private var countriesCache: List<Country>? = null
     // Animated precipitation radar: the RainViewer loop (past → now → forecast).
     private var weatherFrames: List<GeoApi.RainFrame> = emptyList()
     private var weatherAnim: kotlinx.coroutines.Job? = null
@@ -423,6 +429,7 @@ private class RadarController(private val app: Context, private val scope: Corou
             if (set.isNotEmpty()) sources = set
         }
         trafficOn = prefs.getBoolean("traffic", false)
+        bordersOn = prefs.getBoolean("borders", false)
         roadOn = prefs.getBoolean("road", false)
         camsOn = prefs.getBoolean("cams", false)
         alertsOn = prefs.getBoolean("alerts", false)
@@ -434,6 +441,7 @@ private class RadarController(private val app: Context, private val scope: Corou
         dark = null   // force first tile source
         applyLayer()
         applyPalette(palette)
+        if (bordersOn) drawBorders()
 
         mv.controller.setZoom(prefs.getFloat("z", 6.5f).toDouble())
         mv.controller.setCenter(GeoPoint(prefs.getFloat("lat", 55.75f).toDouble(), prefs.getFloat("lon", 37.62f).toDouble()))
@@ -459,6 +467,7 @@ private class RadarController(private val app: Context, private val scope: Corou
             mv.overlayManager.tilesOverlay.setLoadingBackgroundColor(bg)
             mv.overlayManager.tilesOverlay.setLoadingLineColor(bg)
             if (trafficOn) refreshTraffic()
+            if (bordersOn) drawBorders()   // re-tint borders/labels for the theme
             roadIcons.clear()
         }
         ov.lowColor = p.secondary.toArgb()
@@ -796,6 +805,68 @@ private class RadarController(private val app: Context, private val scope: Corou
         weatherOverlay?.let { mv.overlays.remove(it); it.onDetach(mv) }
         weatherOverlay = null
         weatherFrameTime = 0L
+        mv.invalidate()
+    }
+
+    // ------------------------------------------------------------ political borders
+
+    fun toggleBorders() {
+        bordersOn = !bordersOn
+        prefs.edit().putBoolean("borders", bordersOn).apply()
+        if (bordersOn) drawBorders() else removeBorders()
+    }
+
+    private fun loadCountries(): List<Country> {
+        countriesCache?.let { return it }
+        val text = runCatching { app.assets.open("countries_ru.json").bufferedReader().use { it.readText() } }.getOrNull()
+        val list = if (text != null) PoliticalMap.parse(text) else emptyList()
+        countriesCache = list
+        return list
+    }
+
+    /** Draws country fills, bold borders and Russian labels (a HoI4-style
+     *  political map) as an overlay beneath the live markers. */
+    private fun drawBorders() {
+        val mv = map ?: return
+        val list = loadCountries()
+        if (list.isEmpty()) { bordersOn = false; return }
+        val d = app.resources.displayMetrics.density
+        val folder = bordersFolder ?: FolderOverlay().also { bordersFolder = it; mv.overlays.add(0, it) }
+        folder.items.clear()
+        val border = if (dark == true) 0xE6101418.toInt() else 0xE61A1410.toInt()
+        list.forEachIndexed { i, c ->
+            val fill = (PoliticalMap.FILLS[i % PoliticalMap.FILLS.size] and 0x00FFFFFF) or (if (dark == true) 0x66000000 else 0x59000000)
+            for (ring in c.rings) {
+                val pg = Polygon()
+                pg.points = ring.map { GeoPoint(it[1], it[0]) }
+                pg.fillPaint.color = fill
+                pg.outlinePaint.color = border
+                pg.outlinePaint.strokeWidth = 2.6f * d
+                pg.outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                pg.outlinePaint.isAntiAlias = true
+                folder.add(pg)
+            }
+        }
+        // Russian country labels on top of the fills.
+        for (c in list) {
+            val m = Marker(mv)
+            m.position = GeoPoint(c.labelLat, c.labelLon)
+            m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            m.setTextLabelForegroundColor(if (dark == true) 0xFFF2ECE0.toInt() else 0xFF1A1410.toInt())
+            m.setTextLabelBackgroundColor(AndroidColor.TRANSPARENT)
+            m.setTextLabelFontSize((13 * d).toInt())
+            m.setTextIcon(c.name)
+            m.isDraggable = false
+            m.setInfoWindow(null)
+            folder.add(m)
+        }
+        mv.invalidate()
+    }
+
+    private fun removeBorders() {
+        val mv = map ?: return
+        bordersFolder?.let { mv.overlays.remove(it); it.onDetach(mv) }
+        bordersFolder = null
         mv.invalidate()
     }
 
@@ -1991,6 +2062,7 @@ private fun LayerSheet(ctl: RadarController, palette: AbyssPalette, S: Strings, 
             }
         }
         ToggleRow(Icons.Filled.Umbrella, S.radarOverlayWeather, ctl.weatherOn, palette) { ctl.toggleWeather() }
+        ToggleRow(Icons.Filled.Public, S.radarOverlayBorders, ctl.bordersOn, palette) { ctl.toggleBorders() }
         Spacer(Modifier.height(6.dp))
     }
 }

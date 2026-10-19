@@ -161,6 +161,7 @@ object StringsTr : Strings() {
     override val localDownloading = "Model indiriliyor…"
     override val trafficFree = "Açık"
     override val trafficJam = "Tıkanık"
+    override val radarOverlayBorders = "Ülke sınırları"
 
     override val searchHint = "Ara…"
     override val newNote = "Yeni not"
