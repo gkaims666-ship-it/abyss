@@ -138,15 +138,30 @@ object GeoApi {
      * Latest precipitation-radar frame from RainViewer, as a 256px XYZ URL
      * template (…/{z}/{x}/{y}…), or null if unavailable.
      */
-    suspend fun weatherTileTemplate(): String? = withContext(Dispatchers.IO) {
-        val text = get("https://api.rainviewer.com/public/weather-maps.json") ?: return@withContext null
-        val root = runCatching { Http.json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return@withContext null
+    suspend fun weatherTileTemplate(): String? = weatherFrames().lastOrNull()?.template
+
+    /** One precipitation-radar frame: its XYZ URL template and its UTC time. */
+    data class RainFrame(val template: String, val timeSec: Long, val forecast: Boolean)
+
+    /**
+     * The whole RainViewer radar loop — recent past frames plus nowcast
+     * (forecast) frames, oldest first — so the map can animate precipitation
+     * over time instead of showing a single still frame. Key-free.
+     */
+    suspend fun weatherFrames(): List<RainFrame> = withContext(Dispatchers.IO) {
+        val text = get("https://api.rainviewer.com/public/weather-maps.json") ?: return@withContext emptyList()
+        val root = runCatching { Http.json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return@withContext emptyList()
         val host = root.s("host") ?: "https://tilecache.rainviewer.com"
-        val radar = root["radar"] as? JsonObject ?: return@withContext null
-        val past = radar["past"] as? JsonArray ?: return@withContext null
-        val latest = (past.lastOrNull() as? JsonObject)?.s("path") ?: return@withContext null
-        // host + path + /{size}/{z}/{x}/{y}/{color}/{smooth}_{snow}.png
-        host + latest + "/256/{z}/{x}/{y}/4/1_1.png"
+        val radar = root["radar"] as? JsonObject ?: return@withContext emptyList()
+        fun frames(key: String, forecast: Boolean): List<RainFrame> =
+            (radar[key] as? JsonArray).orEmpty().mapNotNull { e ->
+                val o = e as? JsonObject ?: return@mapNotNull null
+                val path = o.s("path") ?: return@mapNotNull null
+                val t = (o["time"] as? JsonPrimitive)?.longOrNull ?: 0L
+                // host + path + /{size}/{z}/{x}/{y}/{color}/{smooth}_{snow}.png
+                RainFrame(host + path + "/256/{z}/{x}/{y}/4/1_1.png", t, forecast)
+            }
+        frames("past", false) + frames("nowcast", true)
     }
 
     /**

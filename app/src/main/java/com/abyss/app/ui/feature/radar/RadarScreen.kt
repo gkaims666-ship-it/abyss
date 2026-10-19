@@ -357,6 +357,12 @@ private class RadarController(private val app: Context, private val scope: Corou
     private var weatherOverlay: TilesOverlay? = null
     private var weatherTemplate: String? = null
     private var weatherFetchedAt = 0L
+    // Animated precipitation radar: the RainViewer loop (past → now → forecast).
+    private var weatherFrames: List<GeoApi.RainFrame> = emptyList()
+    private var weatherAnim: kotlinx.coroutines.Job? = null
+    /** UTC seconds of the frame currently shown (0 = none); the UI shows its clock. */
+    var weatherFrameTime by mutableStateOf(0L)
+    var weatherFrameForecast by mutableStateOf(false)
     private var wikiAt = 0L
     private var eventsFolder: FolderOverlay? = null
     private var eventsAt = 0L
@@ -738,30 +744,57 @@ private class RadarController(private val app: Context, private val scope: Corou
     }
 
     private suspend fun refreshWeather() {
-        val mv = map ?: return
         val now = System.currentTimeMillis()
-        if (weatherTemplate == null || now - weatherFetchedAt > 5 * 60_000L) {
-            weatherTemplate = runCatching { GeoApi.weatherTileTemplate() }.getOrNull()
+        if (weatherFrames.isEmpty() || now - weatherFetchedAt > 5 * 60_000L) {
+            weatherFrames = runCatching { GeoApi.weatherFrames() }.getOrNull().orEmpty()
             weatherFetchedAt = now
         }
-        val tmpl = weatherTemplate ?: run { weatherOn = false; return }
-        removeWeather()
+        if (weatherFrames.isEmpty()) { weatherOn = false; return }
+        startWeatherAnim()
+    }
+
+    /** Plays the radar loop: each frame shows ~0.7 s, holding the newest past
+     *  frame a beat longer, then looping. Double-buffered so it never blinks. */
+    private fun startWeatherAnim() {
+        weatherAnim?.cancel()
+        weatherAnim = scope.launch {
+            var i = weatherFrames.indexOfLast { !it.forecast }.coerceAtLeast(0)
+            while (weatherOn && weatherFrames.isNotEmpty()) {
+                val f = weatherFrames[i]
+                showWeatherFrame(f)
+                val lastPast = !f.forecast && (i == weatherFrames.indexOfLast { !it.forecast })
+                kotlinx.coroutines.delay(if (lastPast) 1400 else 650)
+                i = (i + 1) % weatherFrames.size
+            }
+        }
+    }
+
+    private fun showWeatherFrame(f: GeoApi.RainFrame) {
+        val mv = map ?: return
         val provider = MapTileProviderBasic(app)
         provider.setTileSource(XYTileSource(
             "rainviewer", 1, 18, 256,
-            tmpl.substringAfter("{z}/{x}/{y}"), arrayOf(tmpl.substringBefore("{z}/{x}/{y}")),
+            f.template.substringAfter("{z}/{x}/{y}"), arrayOf(f.template.substringBefore("{z}/{x}/{y}")),
         ))
         val ov = TilesOverlay(provider, app)
         ov.loadingBackgroundColor = AndroidColor.TRANSPARENT
-        weatherOverlay = ov
+        // Add the new frame under the markers, then drop the previous one — so
+        // the precipitation layer never flashes empty between frames.
+        val prev = weatherOverlay
         mv.overlays.add(0, ov)
+        weatherOverlay = ov
+        prev?.let { mv.overlays.remove(it); it.onDetach(mv) }
+        weatherFrameTime = f.timeSec
+        weatherFrameForecast = f.forecast
         mv.invalidate()
     }
 
     private fun removeWeather() {
         val mv = map ?: return
+        weatherAnim?.cancel(); weatherAnim = null
         weatherOverlay?.let { mv.overlays.remove(it); it.onDetach(mv) }
         weatherOverlay = null
+        weatherFrameTime = 0L
         mv.invalidate()
     }
 
@@ -2223,6 +2256,12 @@ private fun StatusPill(ctl: RadarController, palette: AbyssPalette, S: Strings) 
             if (ctl.lastOk > 0) { append(" · "); append(S.radarUpdatedAgo(((now - ctl.lastOk) / 1000).toInt().coerceAtLeast(0))) }
             if (ctl.tooWide) { append(" · "); append(S.radarZoomIn) }
             if (ctl.locationDenied) { append(" · "); append(S.radarLocationDenied) }
+            if (ctl.weatherOn && ctl.weatherFrameTime > 0L) {
+                append(" · "); append(S.radarOverlayWeather); append(' ')
+                if (ctl.weatherFrameForecast) append('~')
+                append(java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                    .format(java.util.Date(ctl.weatherFrameTime * 1000)))
+            }
         }
     }
     Row(
